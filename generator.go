@@ -1,39 +1,55 @@
 package main
 
 import (
+	"encoding/csv"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"strconv"
+	"time"
+
+	"github.com/egorkovalchuk/go-cdrgenerator/data"
 )
 
 //Power by  Egor Kovalchuk
 
-// логи
-const logFileName = "generator.log"
-const pidFileName = "generator.pid"
+const (
+	logFileName = "generator.log"
+	pidFileName = "generator.pid"
+	versionutil = "0.1"
+)
 
-//конфиг
-//var cfg pdata.Config
+var (
+	//конфиг
+	cfg data.Config
 
-// режим работы сервиса(дебаг мод)
-var debugm bool
-var emul bool
+	// режим работы сервиса(дебаг мод)
+	debugm bool
 
-// ошибки
-var err error
+	// ошибки
+	err error
 
-// режим работы сервиса
-var startdaemon bool
+	// режим работы сервиса
+	startdaemon bool
 
-// запрос версии
-var version bool
+	// запрос версии
+	version bool
 
 /*
 Vesion 0.1
 Create
 */
-const versionutil = "0.1"
+
+)
+
+// Запись в лог при включенном дебаге
+func ProcessDebug(logtext interface{}) {
+	if debugm {
+		log.Println(logtext)
+	}
+}
 
 func main() {
 
@@ -46,36 +62,35 @@ func main() {
 	if os.Args != nil && len(os.Args) > 1 {
 		argument = os.Args[1]
 	} else {
-		helpstart()
+		data.HelpStart()
 		return
 	}
 
 	if argument == "-h" {
-		helpstart()
+		data.HelpStart()
 		return
 	}
 
 	flag.BoolVar(&debugm, "t", false, "a bool")
 	flag.BoolVar(&startdaemon, "d", false, "a bool")
 	flag.BoolVar(&version, "v", false, "a bool")
-	flag.BoolVar(&emul, "e", false, "a bool")
 	// for Linux compile
 	stdaemon := flag.Bool("s", false, "a bool") // для передачи
 	// --for Linux compile
-	var listname string
-	flag.StringVar(&listname, "l", "", "Name list is not empty")
-	var message string
-	flag.StringVar(&message, "m", "", "Messge is not empty")
 	flag.Parse()
 
-	if startdaemon {
-		filer, err := os.OpenFile(logFileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
-		if err != nil {
-			log.Fatal(err)
-		}
+	filer, err := os.OpenFile(logFileName, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0666)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-		log.SetOutput(filer)
-		log.Println("- - - - - - - - - - - - - - -")
+	log.SetOutput(filer)
+	log.Println("- - - - - - - - - - - - - - -")
+
+	ProcessDebug("Start with debug mode")
+
+	if startdaemon {
+
 		log.Println("Start daemon mode")
 		if debugm {
 			log.Println("Start with debug mode")
@@ -84,12 +99,17 @@ func main() {
 		fmt.Println("Start daemon mode")
 	}
 
-	//load conf
-	//readconf(&cfg, "smsc.ini")
-
 	if version {
 		fmt.Println("Version utils " + versionutil)
 		return
+	}
+
+	//load conf
+	readconf(&cfg, "config.json")
+
+	if cfg.Common.Duration == 0 {
+		log.Println("Script use default duration - 14400 sec")
+		cfg.Common.Duration = 14400
 	}
 
 	if startdaemon || *stdaemon {
@@ -100,7 +120,7 @@ func main() {
 
 	} else {
 
-		StartShellMode(message, listname)
+		StartSimpleMode()
 
 	}
 	fmt.Println("Done")
@@ -113,48 +133,89 @@ func processError(err error) {
 	os.Exit(2)
 }
 
-func readconf( /*cfg *pdata.Config,*/ confname string) {
-	/*	file, err := os.Open(confname)
-		if err != nil {
-			processError(err)
-		}
+func readconf(cfg *data.Config, confname string) {
+	file, err := os.Open(confname)
+	if err != nil {
+		processError(err)
+	}
 
-		decoder := json.NewDecoder(file)
-		err = decoder.Decode(&cfg)
-		if err != nil {
-			processError(err)
-		}
+	decoder := json.NewDecoder(file)
+	err = decoder.Decode(&cfg)
+	if err != nil {
+		processError(err)
+	}
 
-		file.Close()
+	file.Close()
 
-		if cfg.IPRestrictionType != 0 {
-			var nets []net.IPNet
-
-			for _, p := range cfg.IPRestriction {
-
-				n, err := iprest.IPRest(p)
-				if err != nil {
-					logwrite(err)
-				} else {
-					nets = append(nets, n)
-				}
-			}
-			cfg.Nets = nets
-		}*/
 }
 
-// StartShellMode запуск в режиме скрипта
-func StartShellMode(message string, listname string) {}
+// StartSimpleMode запуск в режиме скрипта
+func StartSimpleMode() {
+	// запускаем отдельные потоки родительские потоки для задач из конфига
+	// родительские породождают дочерние по формуле ???
+	// при завершении времени останавливают дочерние и сами
+	for _, thread := range cfg.Tasks {
+		if thread.DatapoolCsvFile == "" {
+			log.Println("Тo file name specified for" + thread.Name)
+		} else {
+			f, err := os.Open(thread.DatapoolCsvFile)
+			if err != nil {
+				log.Println("Unable to read input file "+thread.DatapoolCsvFile, err)
+				log.Println("Thread " + thread.Name + " not start")
+			} else {
+				defer f.Close()
+				//Вынести в глобальные?
 
-func helpstart() {
-	fmt.Println("Use -l Name list -m \"Text message\"")
-	fmt.Println("Use -d start deamon mode(HTTP service)")
-	fmt.Println("Example 1 curl localhost:8080 -X GET -F src=IT -F lst=rss_1 -F text=hello")
-	fmt.Println("Example 2 curl localhost:8080 -X GET -F src=IT -F dst=79XXXXXXXX -F text=hello)")
-	fmt.Println("Example 3 curl localhost:8080/conf -X GET -F reloadconf=1")
-	fmt.Println("Example 4 curl localhost:8080/list -X GET ")
-	fmt.Println("Use -s stop deamon mode(HTTP service)")
-	fmt.Println("Use -t start with debug mode")
+				// read csv values using csv.Reader
+				csvReader := csv.NewReader(f)
+				csv, err := csvReader.ReadAll()
+				PoolList := data.CreatePoolList(csv)
+				if err != nil {
+					log.Println(err)
+				} else {
+					if debugm {
+						log.Println(PoolList[len(PoolList)-1])
+					}
+					log.Println("Load " + strconv.Itoa(len(PoolList)) + " records")
+					log.Println("Start thread for " + thread.Name)
+					go StartTask(PoolList, thread)
+				}
+
+			}
+		}
+	}
+
+	log.Println("Start schelduler")
+	time.Sleep(time.Duration(cfg.Common.Duration) * time.Second)
+	log.Println("End schelduler")
+
+}
+
+// Горутина формирования CDR
+func StartTask(PoolList []data.RecTypePool, cfg data.TasksType) {
+	for i := 0; i < 5; i++ {
+		log.Println(i)
+		time.Sleep(3 * time.Second)
+	}
+
+}
+
+// Чтение из потока файлов (работа без генератора)
+func StartTransferCDR() {
+
+}
+
+// Запуск потоков подключения к БРТ
+func StartTelnet() {
+	/*diam_cfg := &sm.Settings
+	println(diam_cfg)*/
+}
+
+// Поток телнета
+// два типа каналов CDR и закрытие/переоткрытие
+// +надо сделать keepalive
+func StartTheadTelnet() {
+
 }
 
 func logwrite(err error) {

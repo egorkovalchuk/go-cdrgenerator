@@ -1,0 +1,135 @@
+{
+    "common":{
+       "date_range":{
+          "start":"SYSDATE - 0.1*D",
+          "end":"SYSDATE",
+          "freq":"1s"
+       },
+       "ramp_up":{
+          "time":30,
+          "steps":20
+       },
+       "output_duration":1,
+       "Duration":10
+    },
+    "tasks":[
+       {
+          "Name":"local",
+          "calls_per_second":10000,
+          "rec_type_ratio":[
+             {
+                "name":"01",
+                "rate":20,
+                "type_ser" : "00",
+                "type_code" : "11"
+             },
+             {
+                "name":"02",
+                "rate":20,
+                "type_ser" : "00",
+                "type_code" : "11"
+             },
+             {
+                "name":"08",
+                "rate":40,
+                "type_ser" : "00",
+                "type_code" : "11"
+             },
+             {
+                "name":"09",
+                "rate":10,
+                "type_ser" : "00",
+                "type_code" : "11"
+             },
+             {
+                "name":"70",
+                "rate":10,
+                "type_ser" : "01",
+                "type_code" : "60"
+             }
+          ],
+          "percentile":[
+             0,
+             0.5496,
+             0.8606,
+             0.9686,
+             0.996,
+             1
+          ],
+          "calls_range":[
+             1,
+             10,
+             50,
+             100,
+             500,
+             1000
+          ],
+          "datapool_csv_file":"./calls_local_macr_id_200.csv",
+          "paths_to_save":[
+             "/wfocs_loc/WF/BRT/RTDSC/LOCAL/IN_M0",
+             "/wfocs_loc/WF/BRT/RTDSC/LOCAL/IN_S0"
+          ],
+          "template_save_file" : "calls_{date}.csv",
+          "cdr_pattern": "{rec_type},{rec_number},,,{imsi},{msisdn},79397106080,{datetime},6,,,,,,,{type_ser},{type_code},,,6362,750,6362,750,,,,,,,,,,,,,,,"
+       },
+       {
+          "Name":"roam",
+          "calls_per_second":1000,
+          "rec_type_ratio":[
+             {
+                "name":"01",
+                "rate":20,
+                "type_ser" : "00",
+                "type_code" : "11"
+             },
+             {
+                "name":"02",
+                "rate":20,
+                "type_ser" : "00",
+                "type_code" : "11"
+             },
+             {
+                "name":"08",
+                "rate":40,
+                "type_ser" : "00",
+                "type_code" : "11"
+             },
+             {
+                "name":"09",
+                "rate":10,
+                "type_ser" : "00",
+                "type_code" : "11"
+             },
+             {
+                "name":"70",
+                "rate":10,
+                "type_ser" : "01",
+                "type_code" : "60"
+             }
+          ],
+          "percentile":[
+             0,
+             0.706,
+             0.9819,
+             0.9966,
+             0.9998,
+             1
+          ],
+          "calls_range":[
+             1,
+             10,
+             50,
+             100,
+             500,
+             1000
+          ],
+          "datapool_csv_file":"./calls_roam_macr_id_200.csv",
+          "paths_to_save":[
+             "/wfocs_loc/WF/BRT/RTDSC/ROAM/IN_M0",
+             "/wfocs_loc/WF/BRT/RTDSC/ROAM/IN_S0"
+          ],
+          "template_save_file" : "roam_{date}.csv",
+          "cdr_pattern": "{rec_type},{rec_number},,,{imsi},{msisdn},9959987025,{datetime},126,,05,,,352022064861160,,{type_ser},{type_code},,,135,,,,,,,9959987025,,05,008DB619,,,,GEOMA,+0300,,,995322170000,0,0,0,,,,,,,,RC0003963113.xml,,,,0,0,0,0,1510065489088647,0,1"
+       }
+    ]
+ }

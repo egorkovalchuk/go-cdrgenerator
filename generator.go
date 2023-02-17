@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math/rand"
 	"net"
 	"os"
 	"strconv"
@@ -53,19 +54,25 @@ var (
 	CDRChannel     = make(chan string)
 	ProcessChannel = make(chan string)
 	ErrorChannel   = make(chan error)
+	//Признак запуска дополнительного потока
+	Flag = data.NewFlag()
+	//Скорость потока
+	CDRPerSec = data.NewCounters()
+	//Срез для каналов
+	CDRChanneltoFileUni = make(map[string](chan string))
+	//Статистика записи
+	CDRRecCount     = data.NewCounters()
+	CDRFileCount    = data.NewCounters()
+	CDRRecTypeCount = data.NewRecTypeCounters()
 
-	m sync.Mutex
-
-	CDRPerSec         = data.NewCounters()
-	CDRChanneltoFile1 = make(map[string](chan string))
-
+	//Не используется(в коде закоменчено)
 	CDRChanneltoFile     = make(chan string)
 	CDRRoamChanneltoFile = make(chan string)
 
-	Flag string
+	m sync.Mutex
 
 /*
-Vesion 0.1
+Vesion 0.2
 Create
 */
 
@@ -138,6 +145,7 @@ func main() {
 	//load conf
 	readconf(&cfg, "config.json")
 
+	//Если не задан параметр используем дефольтное значение
 	if cfg.Common.Duration == 0 {
 		log.Println("Script use default duration - 14400 sec")
 		cfg.Common.Duration = 14400
@@ -145,13 +153,23 @@ func main() {
 
 	// запуск горутины записи в лог
 	go LogWriteForGoRutine(ErrorChannel)
+	// Запуск мониторинга
 	go Monitor()
-	// Обнуляем счетчик
 
+	// Обнуляем счетчик и инициализируем
 	for _, task := range cfg.Tasks {
-		//	CDRPerSec[task.Name] = 0
 		CDRPerSec.Store(task.Name, 0)
-		CDRChanneltoFile1[task.Name] = make(chan string)
+		Flag.Store(task.Name, 0)
+		CDRChanneltoFileUni[task.Name] = make(chan string)
+		// Заполнение интервалов для радндомайзера
+		task.RecTypeRatio[0].RangeMax = task.RecTypeRatio[0].Rate
+		task.RecTypeRatio[0].RangeMin = 0
+		for i := 1; i < len(task.RecTypeRatio); i++ {
+			task.RecTypeRatio[i].RangeMin = task.RecTypeRatio[i-1].RangeMax
+			task.RecTypeRatio[i].RangeMax = task.RecTypeRatio[i].Rate + task.RecTypeRatio[i].RangeMin
+			Flag.Store(task.Name+" "+task.RecTypeRatio[i].Name, 0)
+		}
+
 	}
 
 	if startdaemon || *stdaemon {
@@ -196,7 +214,7 @@ func readconf(cfg *data.Config, confname string) {
 // StartSimpleMode запуск в режиме скрипта
 func StartSimpleMode() {
 	// запускаем отдельные потоки родительские потоки для задач из конфига
-	// родительские породождают дочерние по формуле ???
+	// родительские породождают дочерние по формуле
 	// при завершении времени останавливают дочерние и сами
 
 	//Основной цикл
@@ -232,18 +250,18 @@ func StartSimpleMode() {
 					}
 					log.Println("Load " + strconv.Itoa(len(PoolList)) + " records")
 					log.Println("Start thread for " + thread.Name)
-					//Есть идея использовать массив из канало?
-					//Если пишем в фаил
+					// Если пишем в фаил
+					// Запускать потоки записи по количеству путей? Не будет ли пересечение по именам файлов
 					if tofile {
-						if thread.Name == "local" {
+						/*if thread.Name == "local" {
 							go StartFileCDR(thread.PathsToSave[0]+thread.Template_save_file, CDRChanneltoFile)
 						} else {
 							go StartFileCDR(thread.PathsToSave[0]+thread.Template_save_file, CDRRoamChanneltoFile)
-						}
-						//go StartFileCDR(thread.PathsToSave[0]+thread.Template_save_file, CDRChanneltoFile1[thread.Name])
+						}*/
+						go StartFileCDR(thread, CDRChanneltoFileUni[thread.Name])
 					}
 
-					go StartTask(PoolList, thread)
+					go StartTask(PoolList, thread, true)
 				}
 
 			}
@@ -252,14 +270,24 @@ func StartSimpleMode() {
 
 	log.Println("Start schelduler")
 	time.Sleep(time.Duration(cfg.Common.Duration) * time.Second)
+	for _, thread := range cfg.Tasks {
+		log.Println("All load " + strconv.Itoa(CDRRecCount.Load(thread.Name)) + " records for " + thread.Name)
+		if tofile {
+			log.Println("Save " + strconv.Itoa(CDRFileCount.Load(thread.Name)) + " files for " + thread.Name)
+		}
+	}
 	log.Println("End schelduler")
 
 }
 
 // Функция контроля рейтов
+// Считать ли по рек тайпам?
 func Monitor() {
 	heartbeat := time.Tick(1 * time.Second)
+	heartbeat10 := time.Tick(10 * time.Second)
+
 	var CDR int
+
 	time.Sleep(5 * time.Second)
 
 	for {
@@ -267,39 +295,50 @@ func Monitor() {
 		case <-heartbeat:
 			for _, thread := range cfg.Tasks {
 				CDR = CDRPerSec.Load(thread.Name)
-				log.Println("Speed task " + thread.Name + " " + strconv.Itoa(CDR) + " op/s")
-				if CDR < thread.CallsPerSecond {
-					m.Lock()
-					Flag = thread.Name
-					m.Unlock()
+				if debugm {
+					log.Println("Speed task " + thread.Name + " " + strconv.Itoa(CDR) + " op/s")
 				}
+				if CDR < thread.CallsPerSecond {
+					Flag.Store(thread.Name, 1)
+				}
+				CDRRecCount.IncN(thread.Name, CDR)
 
 				CDRPerSec.Store(thread.Name, 0)
 
+			}
+		case <-heartbeat10:
+			for _, thread := range cfg.Tasks {
+				log.Println("Load " + strconv.Itoa(CDRRecCount.Load(thread.Name)) + " records for " + thread.Name)
+				if tofile {
+					log.Println("Save " + strconv.Itoa(CDRFileCount.Load(thread.Name)) + " files for " + thread.Name)
+				}
+				for _, t := range thread.RecTypeRatio {
+					log.Println("Load " + thread.Name + " calls type " + t.Name + " " + CDRRecTypeCount.LoadString(thread.Name+" "+t.Name))
+				}
 			}
 		}
 	}
 }
 
 // Горутина формирования CDR
-func StartTask(PoolList []data.RecTypePool, cfg data.TasksType) {
+func StartTask(PoolList []data.RecTypePool, cfg data.TasksType, FirstStart bool) {
 
 	var PoolIndex int
 	var PoolIndexMax int
 	var CDR int
+	var RecTypeIndex int
+	var tmp int
 	PoolIndex = 0
 	PoolIndexMax = len(PoolList) - 1
 
 	for {
-		/*m.Lock()
-		if Flag == cfg.Name {
-			log.Println("Start new thead " + cfg.Name)
-			go StartTask(PoolList, cfg)
-			//	m.Lock()
-			Flag = ""
-			//	m.Unlock()
+		if FirstStart {
+			if Flag.Load(cfg.Name) == 1 {
+				log.Println("Start new thead " + cfg.Name)
+				go StartTask(PoolList, cfg, false)
+				Flag.Store(cfg.Name, 0)
+			}
 		}
-		m.Unlock()*/
 
 		CDR = CDRPerSec.Load(cfg.Name)
 		if CDR < cfg.CallsPerSecond {
@@ -308,18 +347,31 @@ func StartTask(PoolList []data.RecTypePool, cfg data.TasksType) {
 				PoolIndex = 0
 			}
 
-			CDRPerSec.Inc(cfg.Name)
+			//CDRPerSec.Inc(cfg.Name)
 			PoolIndex++
 
-			rr := data.CreateCDRRecord(PoolList[PoolIndex], time.Now(), cfg.RecTypeRatio[0], cfg.CDR_pattern)
+			tmp = PoolList[PoolIndex].CallsCount
 
-			if cfg.Name == "local" {
-				CDRChanneltoFile <- rr
-			} else {
-				CDRRoamChanneltoFile <- rr
-			}
-			if err != nil {
-				ErrorChannel <- err
+			if tmp != 0 {
+
+				PoolList[PoolIndex].CallsCount = tmp - 1
+
+				RecTypeIndex = data.RandomRecType(cfg.RecTypeRatio, rand.Intn(100))
+				CDRRecTypeCount.Inc(cfg.Name + " " + cfg.RecTypeRatio[RecTypeIndex].Name)
+
+				rr := data.CreateCDRRecord(PoolList[PoolIndex], time.Now(), cfg.RecTypeRatio[RecTypeIndex], cfg.CDR_pattern)
+
+				/*if cfg.Name == "local" {
+					CDRChanneltoFile <- rr
+				} else {
+					CDRRoamChanneltoFile <- rr
+				}*/
+				//m.Lock()
+				CDRChanneltoFileUni[cfg.Name] <- rr
+				//m.Unlock()
+				if err != nil {
+					ErrorChannel <- err
+				}
 			}
 		}
 
@@ -328,13 +380,20 @@ func StartTask(PoolList []data.RecTypePool, cfg data.TasksType) {
 }
 
 // Запись в Фаил
-func StartFileCDR(FileName string, InputString <-chan string) {
-	f, err := os.Create(strings.Replace(FileName, "{date}", time.Now().Format("20060201030405"), 1))
+func StartFileCDR(task data.TasksType, InputString <-chan string) {
+	// Запись в разные каталоги
+	var DirNum int
+	var DirNumLen int
+	DirNumLen = len(task.PathsToSave)
+
+	f, err := os.Create(strings.Replace(task.PathsToSave[0]+task.Template_save_file, "{date}", time.Now().Format("20060201030405"), 1))
 
 	if err != nil {
 		ErrorChannel <- err
 	}
-	log.Println("Start write " + f.Name())
+	if debugm {
+		log.Println("Start write " + f.Name())
+	}
 	defer f.Close()
 
 	//heartbeat := time.Tick(1 * time.Second)
@@ -346,15 +405,24 @@ func StartFileCDR(FileName string, InputString <-chan string) {
 		select {
 		case <-heartbeat:
 			f.Close()
-			f, err = os.Create(strings.Replace(FileName, "{date}", time.Now().Format("20060201030405"), 1))
+			// Добавить директорию на выбор
+			DirNum = rand.Intn(DirNumLen)
+			f, err = os.Create(strings.Replace(task.PathsToSave[DirNum]+task.Template_save_file, "{date}", time.Now().Format("20060201030405"), 1))
+
 			if err != nil {
 				ErrorChannel <- err
 			}
+			if debugm {
+				log.Println("Start write " + f.Name())
+			}
+			CDRFileCount.Inc(task.Name)
 			defer f.Close() //Закрыть фаил при нешаттном завершении
 		default:
-			//MapMutex.RLock()
+
 			str := <-InputString
-			//MapMutex.RUnlock()
+			//Перенес из генерации, в одном потоке будет работать быстрее
+			CDRPerSec.Inc(task.Name)
+
 			_, err = f.WriteString(str)
 			_, err = f.WriteString("\n")
 

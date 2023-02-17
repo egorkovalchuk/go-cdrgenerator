@@ -5,3 +5,10 @@
 require github.com/fiorix/go-diameter v3.0.2+incompatible 
 require github.com/ishidawataru/sctp v0.0.0-20210707070123-9a39160e9062 
 require golang.org/x/net v0.5.0
+
+"/wfocs_loc/WF/BRT/RTDSC/LOCAL/IN_M0",
+"/wfocs_loc/WF/BRT/RTDSC/LOCAL/IN_S0"
+
+"/wfocs_loc/WF/BRT/RTDSC/ROAM/IN_M0",
+"/wfocs_loc/WF/BRT/RTDSC/ROAM/IN_S0"
+

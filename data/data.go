@@ -48,6 +48,8 @@ type RecTypeRatioType struct {
 	Rate     int    `json:"rate"`
 	TypeSer  string `json:"type_ser"`
 	TypeCode string `json:"type_code"`
+	RangeMin int
+	RangeMax int
 }
 
 //Структура строки пула
@@ -82,7 +84,7 @@ func (p PoolSubs) CreatePoolList(data [][]string, Task TasksType) PoolSubs {
 	return PoolList
 }
 
-//Заполнение количествово выбора на абонента
+// Заполнение количествово выбора на абонента
 func (p *TasksType) GenCallCount() int {
 	perc := rand.Float64()
 	arraylen := len(p.Percentile)
@@ -94,6 +96,19 @@ func (p *TasksType) GenCallCount() int {
 		}
 	}
 	return callcount
+}
+
+// Возвращение типа звонка по рандому
+func RandomRecType(RecType []RecTypeRatioType, c int) int {
+	var RecTypeCount int
+	RecTypeCount = len(RecType)
+
+	for i := 0; i < RecTypeCount; i++ {
+		if RecType[i].RangeMin < c && RecType[i].RangeMax > c {
+			return i
+		}
+	}
+	return 0
 }
 
 //Преобразование вещественного и строку
@@ -122,17 +137,20 @@ func CreateCDRRecord(RecordMsisdn RecTypePool, date time.Time, RecordType RecTyp
 }
 
 // map c mutex
+// для контроля потока записи. Мутекс для избегания блокировок
 type Counters struct {
 	mx sync.Mutex
 	m  map[string]int
 }
 
+// Конструктор для типа данных Counters
 func NewCounters() *Counters {
 	return &Counters{
 		m: make(map[string]int),
 	}
 }
 
+// Записать значение
 func (c *Counters) Load(key string) int {
 	c.mx.Lock()
 	val, _ := c.m[key]
@@ -140,14 +158,95 @@ func (c *Counters) Load(key string) int {
 	return val
 }
 
+//Загрузить значение
 func (c *Counters) Store(key string, value int) {
 	c.mx.Lock()
 	c.m[key] = value
 	c.mx.Unlock()
 }
 
+// Инкримент +1
 func (c *Counters) Inc(key string) {
 	c.mx.Lock()
 	c.m[key]++
 	c.mx.Unlock()
+}
+
+// Инкримент +N
+func (c *Counters) IncN(key string, inc int) {
+	c.mx.Lock()
+	c.m[key] += inc
+	c.mx.Unlock()
+}
+
+// map c mutex
+// для контроля потока записи. Мутекс для избегания блокировок
+type FlagType struct {
+	mx sync.Mutex
+	m  map[string]int
+}
+
+// Конструктор для типа данных Flag
+func NewFlag() *FlagType {
+	return &FlagType{
+		m: make(map[string]int),
+	}
+}
+
+// Записать значение
+func (c *FlagType) Load(key string) int {
+	c.mx.Lock()
+	val, _ := c.m[key]
+	c.mx.Unlock()
+	return val
+}
+
+//Загрузить значение
+func (c *FlagType) Store(key string, value int) {
+	c.mx.Lock()
+	c.m[key] = value
+	c.mx.Unlock()
+}
+
+// map c mutex
+// для контроля потока записи. Мутекс для избегания блокировок
+type RecTypeCounters struct {
+	mx sync.Mutex
+	m  map[string]int
+}
+
+// Конструктор для типа данных Counters
+func NewRecTypeCounters() *RecTypeCounters {
+	return &RecTypeCounters{
+		m: make(map[string]int),
+	}
+}
+
+// Записать значение
+func (c *RecTypeCounters) Load(key string) int {
+	c.mx.Lock()
+	val, _ := c.m[key]
+	c.mx.Unlock()
+	return val
+}
+
+//Загрузить значение
+func (c *RecTypeCounters) Store(key string, value int) {
+	c.mx.Lock()
+	c.m[key] = value
+	c.mx.Unlock()
+}
+
+// Инкримент +1
+func (c *RecTypeCounters) Inc(key string) {
+	c.mx.Lock()
+	c.m[key]++
+	c.mx.Unlock()
+}
+
+func (c *RecTypeCounters) LoadString(key string) string {
+	c.mx.Lock()
+	val, _ := c.m[key]
+	c.mx.Unlock()
+	return strconv.Itoa(val)
 }

@@ -16,7 +16,7 @@ type Config struct {
 
 type CommonType struct {
 	Duration  int
-	BRT       string
+	BRT       []string
 	BRT_port  int
 	DateRange struct {
 		Start string `json:"start"`
@@ -121,7 +121,7 @@ func FloatToString(input_num float64) string {
 //Формируется из шаблона с заменой
 func CreateCDRRecord(RecordMsisdn RecTypePool, date time.Time, RecordType RecTypeRatioType, cfg string) string {
 	// Номер записи, добавить генерацию
-	rec_number := 1
+	rec_number := time.Now().Format("0201030405")
 	//TasksType.CDR_pattern
 	CDR_pattern := cfg
 
@@ -130,7 +130,7 @@ func CreateCDRRecord(RecordMsisdn RecTypePool, date time.Time, RecordType RecTyp
 	CDR_pattern = strings.Replace(CDR_pattern, "{type_ser}", RecordType.TypeSer, 1)
 	CDR_pattern = strings.Replace(CDR_pattern, "{imsi}", RecordMsisdn.IMSI, 1)
 	CDR_pattern = strings.Replace(CDR_pattern, "{msisdn}", RecordMsisdn.Msisdn, 1)
-	CDR_pattern = strings.Replace(CDR_pattern, "{rec_number}", strconv.Itoa(rec_number), 1)
+	CDR_pattern = strings.Replace(CDR_pattern, "{rec_number}", rec_number, 1)
 	CDR_pattern = strings.Replace(CDR_pattern, "{datetime}", date.Format("20060201030405"), 1)
 
 	return CDR_pattern
@@ -212,41 +212,51 @@ func (c *FlagType) Store(key string, value int) {
 // для контроля потока записи. Мутекс для избегания блокировок
 type RecTypeCounters struct {
 	mx sync.Mutex
-	m  map[string]int
+	m  map[string]map[string]int
 }
 
-// Конструктор для типа данных Counters
+// Конструктор для типа данных Counters для расчетов по типам
 func NewRecTypeCounters() *RecTypeCounters {
 	return &RecTypeCounters{
-		m: make(map[string]int),
+		m: make(map[string]map[string]int),
 	}
 }
 
+func (c *RecTypeCounters) AddMap(key1 string, key2 string, val int) map[string]map[string]int {
+	mm, ok := c.m[key1]
+	if !ok {
+		mm = make(map[string]int)
+		c.m[key1] = mm
+	}
+	c.m[key1][key2] = val
+	return c.m
+}
+
 // Записать значение
-func (c *RecTypeCounters) Load(key string) int {
+func (c *RecTypeCounters) Load(key1 string, key2 string) int {
 	c.mx.Lock()
-	val, _ := c.m[key]
+	val, _ := c.m[key1][key2]
 	c.mx.Unlock()
 	return val
 }
 
 //Загрузить значение
-func (c *RecTypeCounters) Store(key string, value int) {
+func (c *RecTypeCounters) Store(key1 string, key2 string, value int) {
 	c.mx.Lock()
-	c.m[key] = value
+	c.m[key1][key2] = value
 	c.mx.Unlock()
 }
 
 // Инкримент +1
-func (c *RecTypeCounters) Inc(key string) {
+func (c *RecTypeCounters) Inc(key1 string, key2 string) {
 	c.mx.Lock()
-	c.m[key]++
+	c.m[key1][key2]++
 	c.mx.Unlock()
 }
 
-func (c *RecTypeCounters) LoadString(key string) string {
+func (c *RecTypeCounters) LoadString(key1 string, key2 string) string {
 	c.mx.Lock()
-	val, _ := c.m[key]
+	val, _ := c.m[key1][key2]
 	c.mx.Unlock()
 	return strconv.Itoa(val)
 }

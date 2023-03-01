@@ -1,5 +1,9 @@
 package data
 
+import (
+	"encoding/xml"
+)
+
 // VENDOR_ID "Peter-Service Ltd."
 const PETER_SERVICE_VENDOR_ID = 11971
 
@@ -221,3 +225,47 @@ const APPL_ID_NASREQ = 1 // NASREQ					(RFC3588-11.2.2)
 const APPL_ID_DIAMIP = 2 // Mobile-IP				(RFC3588-11.2.2)
 const APPL_ID_DIAMBA = 3 // Diameter Base Acounting	(RFC3588-11.2.2)
 const APPL_ID_DIAMCC = 4 // Diameter Credit Control	(RFC4006-12.1)
+
+//по идее есть в экзамплах 4-272
+var HelloDictionary = xml.Header + `
+<diameter>
+	<application id="4" type="acct">
+		<command code="272" short="CC" name="Credit-Control">
+			<request>
+				<rule avp="Session-Id" required="true" max="1"/>
+				<rule avp="Origin-Host" required="true" max="1"/>
+				<rule avp="Origin-Realm" required="true" max="1"/>
+				<rule avp="Destination-Realm" required="true" max="1"/>
+				<rule avp="Destination-Host" required="false" max="1"/>
+				<rule avp="Auth-Application-Id" required="true" max="1"/>
+				<rule avp="CC-Request-Type" required="true" max="1"/>
+				<rule avp="CC-Request-Number" required="true" max="1"/>
+				<rule avp="User-Name" required="false" max="1"/>
+				<rule avp="Product-Name" required="false" max="1"/>
+				<rule avp="Origin-State-Id" required="false" max="1"/>
+				<rule avp="Supported-Vendor-Id" required="false" max="1"/>
+				<rule avp="Inband-Security-Id" required="false" max="1"/>
+				<rule avp="Acct-Application-Id" required="false" max="1"/>
+				<rule avp="Vendor-Specific-Application-Id" required="false" max="1"/>
+				<rule avp="Firmware-Revision" required="false" max="1"/>
+
+			</request>
+			<answer>
+				<rule avp="Session-Id" required="true" max="1"/>
+				<rule avp="Result-Code" required="true" max="1"/>
+				<rule avp="Origin-Host" required="true" max="1"/>
+				<rule avp="Origin-Realm" required="true" max="1"/>
+				<rule avp="CC-Request-Type" required="true" max="1"/>
+				<rule avp="CC-Request-Number" required="true" max="1"/>
+				<rule avp="Error-Message" required="false" max="1"/>
+				<rule avp="Auth-Application-Id" required="false" max="1"/>
+				<rule avp="Inband-Security-Id" required="false" max="1"/>
+				<rule avp="Acct-Application-Id" required="false" max="1"/>
+				<rule avp="Vendor-Specific-Application-Id" required="false" max="1"/>
+				<rule avp="Firmware-Revision" required="false" max="1"/>
+
+			</answer>
+		</command>
+	</application>
+</diameter>
+`

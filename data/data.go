@@ -1,8 +1,10 @@
 package data
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,10 +17,11 @@ type Config struct {
 }
 
 type CommonType struct {
-	Duration  int
-	BRT       []string
-	BRT_port  int
-	DateRange struct {
+	Duration   int
+	BRT        []string
+	BRT_port   int
+	CAMEL_port int
+	DateRange  struct {
 		Start string `json:"start"`
 		End   string `json:"end"`
 		Freq  string `json:"freq"`
@@ -60,6 +63,24 @@ type RecTypePool struct {
 }
 
 type PoolSubs []RecTypePool
+
+func (cfg *Config) ReadConf(confname string) {
+	file, err := os.Open(confname)
+	if err != nil {
+		ProcessError(err)
+	}
+	// Закрытие при нештатном завершении
+	defer file.Close()
+
+	decoder := json.NewDecoder(file)
+	err = decoder.Decode(&cfg)
+	if err != nil {
+		ProcessError(err)
+	}
+
+	file.Close()
+
+}
 
 //Вызов справки
 func HelpStart() {
@@ -259,4 +280,10 @@ func (c *RecTypeCounters) LoadString(key1 string, key2 string) string {
 	val, _ := c.m[key1][key2]
 	c.mx.Unlock()
 	return strconv.Itoa(val)
+}
+
+// Нештатное завершение при критичной ошибке
+func ProcessError(err error) {
+	fmt.Println(err)
+	os.Exit(2)
 }

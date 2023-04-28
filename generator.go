@@ -2,9 +2,9 @@ package main
 
 import (
 	"encoding/csv"
-	"encoding/json"
 	"flag"
 	"fmt"
+
 	"log"
 	"math/rand"
 	"net"
@@ -15,12 +15,12 @@ import (
 	"time"
 
 	"github.com/egorkovalchuk/go-cdrgenerator/data"
-	"github.com/fiorix/go-diameter/diam"
-	"github.com/fiorix/go-diameter/diam/avp"
-	"github.com/fiorix/go-diameter/diam/datatype"
-	"github.com/fiorix/go-diameter/diam/dict"
-	"github.com/fiorix/go-diameter/diam/sm"
-	"github.com/fiorix/go-diameter/diam/sm/smpeer"
+	"github.com/fiorix/go-diameter/v4/diam"
+	"github.com/fiorix/go-diameter/v4/diam/avp"
+	"github.com/fiorix/go-diameter/v4/diam/datatype"
+	"github.com/fiorix/go-diameter/v4/diam/dict"
+	"github.com/fiorix/go-diameter/v4/diam/sm"
+	"github.com/fiorix/go-diameter/v4/diam/sm/smpeer"
 )
 
 //Power by  Egor Kovalchuk
@@ -33,7 +33,7 @@ const (
 
 var (
 	//конфиг
-	cfg data.Config
+	global_cfg data.Config
 
 	// режим работы сервиса(дебаг мод)
 	debugm bool
@@ -126,6 +126,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer filer.Close()
 
 	log.SetOutput(filer)
 	log.Println("- - - - - - - - - - - - - - -")
@@ -135,10 +136,7 @@ func main() {
 	if startdaemon {
 
 		log.Println("Start daemon mode")
-		if debugm {
-			log.Println("Start with debug mode")
-		}
-
+		ProcessDebug("Start with debug mode")
 		fmt.Println("Start daemon mode")
 	}
 
@@ -147,17 +145,17 @@ func main() {
 		return
 	}
 
-	//load conf
-	readconf(&cfg, "config.json")
+	//Чтение конфига
+	global_cfg.ReadConf("config.json")
 
 	//Если не задан параметр используем дефольтное значение
-	if cfg.Common.Duration == 0 {
+	if global_cfg.Common.Duration == 0 {
 		log.Println("Script use default duration - 14400 sec")
-		cfg.Common.Duration = 14400
+		global_cfg.Common.Duration = 14400
 	}
 
 	// Обнуляем счетчик и инициализируем
-	for _, task := range cfg.Tasks {
+	for _, task := range global_cfg.Tasks {
 		// Иницмализация счетчика
 		CDRPerSec.Store(task.Name, 0)
 		// Инициализация флага запуска дополнительной горутины
@@ -175,9 +173,14 @@ func main() {
 		task.RecTypeRatio[0].RangeMax = task.RecTypeRatio[0].Rate
 		task.RecTypeRatio[0].RangeMin = 0
 		for i := 1; i < len(task.RecTypeRatio); i++ {
+			// Заполняем проценты попадания типа звонков
+			// 0..56..78..98..100
+			// в основном теле генерируем случайное значение от 0 до 100 которое должно попасть с один из интервалов
 			task.RecTypeRatio[i].RangeMin = task.RecTypeRatio[i-1].RangeMax
 			task.RecTypeRatio[i].RangeMax = task.RecTypeRatio[i].Rate + task.RecTypeRatio[i].RangeMin
-			Flag.Store(task.Name+" "+task.RecTypeRatio[i].Name, 0)
+			// Нахрена это добавлено? пока не удаляю. мож вспомню
+			// Flag.Store(task.Name+" "+task.RecTypeRatio[i].Name, 0)
+			// Инициализация счетчика типов звонка
 			CDRRecTypeCount.AddMap(task.Name, task.RecTypeRatio[i].Name, 0)
 		}
 
@@ -188,13 +191,10 @@ func main() {
 	// Запуск мониторинга
 	go Monitor()
 
-	//Определяем ветку
+	// Определяем ветку
+	// Запускать горутиной с ожиданием процесса сигналов от ОС
 	if startdaemon || *stdaemon {
-
-		//processinghttp(&cfg, debugm)
-
 		log.Println("daemon terminated")
-
 	} else if brt {
 		StartDiameterClient()
 	} else {
@@ -207,30 +207,6 @@ func main() {
 
 }
 
-// Нештатное завершение при критичной ошибке
-func ProcessError(err error) {
-	fmt.Println(err)
-	os.Exit(2)
-}
-
-func readconf(cfg *data.Config, confname string) {
-	file, err := os.Open(confname)
-	if err != nil {
-		ProcessError(err)
-	}
-	// Закрытие при нештатном завершении
-	defer file.Close()
-
-	decoder := json.NewDecoder(file)
-	err = decoder.Decode(&cfg)
-	if err != nil {
-		ProcessError(err)
-	}
-
-	file.Close()
-
-}
-
 // StartSimpleMode запуск в режиме скрипта
 func StartSimpleMode() {
 	// запускаем отдельные потоки родительские потоки для задач из конфига
@@ -239,7 +215,7 @@ func StartSimpleMode() {
 	// Добавить сигнал остановки
 
 	//Основной цикл
-	for _, thread := range cfg.Tasks {
+	for _, thread := range global_cfg.Tasks {
 		if thread.DatapoolCsvFile == "" {
 			log.Println("Please, set the file name specified for" + thread.Name)
 		} else {
@@ -254,9 +230,11 @@ func StartSimpleMode() {
 
 				// read csv values using csv.Reader
 				csvReader := csv.NewReader(f)
+				// Разделитель CSV
 				csvReader.Comma = ';'
 				csv, err := csvReader.ReadAll()
 
+				//Заполнение количества звонков на абонента
 				var PoolList data.PoolSubs
 				PoolList = PoolList.CreatePoolList(csv, thread)
 
@@ -268,15 +246,18 @@ func StartSimpleMode() {
 
 					log.Println("Load " + strconv.Itoa(len(PoolList)) + " records")
 					log.Println("Start thread for " + thread.Name)
-					// Если пишем в фаил
+					// Если пишем в фаил, в начале запускаем потоки записи в фаил или коннекта к BRT
 					// Запускать потоки записи по количеству путей? Не будет ли пересечение по именам файлов
 					if tofile {
-						/*if thread.Name == "local" {
-							go StartFileCDR(thread.PathsToSave[0]+thread.Template_save_file, CDRChanneltoFile)
-						} else {
-							go StartFileCDR(thread.PathsToSave[0]+thread.Template_save_file, CDRRoamChanneltoFile)
-						}*/
 						go StartFileCDR(thread, CDRChanneltoFileUni[thread.Name])
+					}
+					if brt {
+						// Запуск потока БРТ
+						// Нужна ли горутина
+						// Нужно ли несколко потоков? для разделения Идет ли роуминг по онлайну.
+						// Сколько нужно 2/4/6 потоков
+						// go StartDiameterClient()
+						StartDiameterClient()
 					}
 
 					go StartTask(PoolList, thread, true)
@@ -287,8 +268,10 @@ func StartSimpleMode() {
 	}
 
 	log.Println("Start schelduler")
-	time.Sleep(time.Duration(cfg.Common.Duration) * time.Second)
-	for _, thread := range cfg.Tasks {
+	// Ждем выполнение таймаута
+	// Добавить в дальнейшем выход по событию от системы
+	time.Sleep(time.Duration(global_cfg.Common.Duration) * time.Second)
+	for _, thread := range global_cfg.Tasks {
 		log.Println("All load " + strconv.Itoa(CDRRecCount.Load(thread.Name)) + " records for " + thread.Name)
 		if tofile {
 			log.Println("Save " + strconv.Itoa(CDRFileCount.Load(thread.Name)) + " files for " + thread.Name)
@@ -311,7 +294,7 @@ func Monitor() {
 	for {
 		select {
 		case <-heartbeat:
-			for _, thread := range cfg.Tasks {
+			for _, thread := range global_cfg.Tasks {
 				CDR = CDRPerSec.Load(thread.Name)
 				ProcessDebug("Speed task " + thread.Name + " " + strconv.Itoa(CDR) + " op/s")
 
@@ -322,20 +305,21 @@ func Monitor() {
 				CDRPerSec.Store(thread.Name, 0)
 			}
 		case <-heartbeat10:
-			for _, thread := range cfg.Tasks {
-				log.Println("Load " + strconv.Itoa(CDRRecCount.Load(thread.Name)) + " records for " + thread.Name)
+			log.Println("INFO: 10 second generator statistics")
+			for _, thread := range global_cfg.Tasks {
+				log.Println("INFO: Load " + strconv.Itoa(CDRRecCount.Load(thread.Name)) + " records for " + thread.Name)
 				if tofile {
-					log.Println("Save " + strconv.Itoa(CDRFileCount.Load(thread.Name)) + " files for " + thread.Name)
+					log.Println("INFO: Save " + strconv.Itoa(CDRFileCount.Load(thread.Name)) + " files for " + thread.Name)
 				}
 				for _, t := range thread.RecTypeRatio {
-					log.Println("Load " + thread.Name + " calls type " + t.Name + " " + CDRRecTypeCount.LoadString(thread.Name, t.Name))
+					log.Println("INFO: Load " + thread.Name + " calls type " + t.Name + " " + CDRRecTypeCount.LoadString(thread.Name, t.Name))
 				}
 			}
 		}
 	}
 }
 
-// Горутина формирования CDR
+// Горутина формирования CDR/данных для вызова
 func StartTask(PoolList []data.RecTypePool, cfg data.TasksType, FirstStart bool) {
 
 	var PoolIndex int
@@ -378,19 +362,24 @@ func StartTask(PoolList []data.RecTypePool, cfg data.TasksType, FirstStart bool)
 				RecTypeIndex = data.RandomRecType(cfg.RecTypeRatio, rand.Intn(100))
 				CDRRecTypeCount.Inc(cfg.Name, cfg.RecTypeRatio[RecTypeIndex].Name)
 
-				rr := data.CreateCDRRecord(PoolList[PoolIndex], time.Now(), cfg.RecTypeRatio[RecTypeIndex], cfg.CDR_pattern)
+				if brt {
+					log.Println("Передача в брт")
+				} else if brtcamel {
+					log.Println("Передача в брт Camel")
+				} else if tofile { //Запись в фаил
+					// Формирование готовой строки для записи в фаил
+					// Скорее всего роуминг пишем только файлы
+					rr := data.CreateCDRRecord(PoolList[PoolIndex], time.Now(), cfg.RecTypeRatio[RecTypeIndex], cfg.CDR_pattern)
 
-				/*if cfg.Name == "local" {
-					CDRChanneltoFile <- rr
+					CDRChanneltoFileUni[cfg.Name] <- rr
+
+					if err != nil {
+						ErrorChannel <- err
+					}
 				} else {
-					CDRRoamChanneltoFile <- rr
-				}*/
-				//m.Lock()
-				CDRChanneltoFileUni[cfg.Name] <- rr
-				//m.Unlock()
-				if err != nil {
-					ErrorChannel <- err
+					log.Println("Usage options not set " + cfg.Name)
 				}
+
 			}
 		}
 
@@ -463,7 +452,7 @@ func StartTransferCDR(FileName string, InputString <-chan string) {
 func StartDiameterClient() {
 
 	var brt_adress []datatype.Address
-	for _, ip := range cfg.Common.BRT {
+	for _, ip := range global_cfg.Common.BRT {
 		brt_adress = append(brt_adress, datatype.Address(net.ParseIP(ip)))
 	}
 
@@ -471,10 +460,10 @@ func StartDiameterClient() {
 	ProcessDebug("Load Diameter config")
 
 	diam_cfg := &sm.Settings{
-		OriginHost:       datatype.DiameterIdentity("client"),
-		OriginRealm:      datatype.DiameterIdentity("go-diameter"),
+		OriginHost:       datatype.DiameterIdentity("ctf-util1"),
+		OriginRealm:      datatype.DiameterIdentity("ocsgf.msk.megafon.ru"),
 		VendorID:         data.PETER_SERVICE_VENDOR_ID,
-		ProductName:      "CDR-generator",
+		ProductName:      "CDR-generator", //internet.volume.pcef.vpcef
 		OriginStateID:    datatype.Unsigned32(time.Now().Unix()),
 		FirmwareRevision: 1,
 		//HostIPAddresses:  brt_adress,
@@ -505,11 +494,46 @@ func StartDiameterClient() {
 		EnableWatchdog:     true,
 		WatchdogInterval:   5 * time.Second,
 
+		AuthApplicationID: []*diam.AVP{
+			//AVP Auth-Application-Id (код 258) имеет тип Unsigned32 и используется для публикации поддержки  Authentication and Authorization части diameter приложения (см. Section 2.4).
+			//Если AVP Auth-Application-Id присутствует в сообщении, отличном от CER и CEA, значение этого AVP ДОЛЖНО соответствовать Application-Id, присутствующему в заголовке этого сообщения Diameter.
+			diam.NewAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(4)), // RFC 4006
+		},
+		AcctApplicationID: []*diam.AVP{
+			// Acct-Application-Id AVP (AVP-код 259) имеет тип Unsigned32 и используется для публикации поддержки  Accountingand части diameter приложения (см. Section 2.4)
+			//Если AVP Acct-Application-Id присутствует в сообщении, отличном от CER и CEA, значение этого AVP ДОЛЖНО соответствовать Application-Id, присутствующему в заголовке этого сообщения Diameter.
+			diam.NewAVP(avp.AcctApplicationID, avp.Mbit, 0, datatype.Unsigned32(3)), //3
+		},
+
+		//Vendor-Specific-Application-Id AVP
+		//Vendor-Specific-Application-Id AVP (код 260) имеет тип Grouped и используется для публикации поддержки vendor-specific Diameter-приложения. Точно один экземпляр Auth-Application-Id или Acct-Application-Id AVP ДОЛЖЕН присутствовать в составе этого AVP. Идентификатор приложения, переносимый либо Auth-Application-Id, либо Acct-Application-Id AVP, ДОЛЖЕН соответствовать идентификатору приложения конкретного поставщика, описанному в (Section 11.3 наверное 5.3). Он ДОЛЖЕН также соответствовать идентификатору приложения, присутствующему в заголовке Diameter сообщений, за исключением  сообщении CER или CEA.
+		//
+		//AVP Vendor-Id - это информационный AVP, относящийся к поставщику, который может иметь авторство конкретного приложения Diameter. Он НЕ ДОЛЖЕН использоваться в качестве средства определения отдельного пространства идентификаторов Application-Id.
+		//
+		//AVP Vendor-Specific-Application-Id  ДОЛЖЕН быть установлен как можно ближе к заголовку Diameter.
+		//
+		//     AVP Format
+		//      <Vendor-Specific-Application-Id> ::= < AVP Header: 260 >
+		//                                           { Vendor-Id }
+		//                                           [ Auth-Application-Id ]
+		//                                          [ Acct-Application-Id ]
+		//AVP Vendor-Specific-Application-Id  ДОЛЖЕН содержать только один из идентификаторов Auth-Application-Id или Acct-Application-Id. Если AVP Vendor-Specific-Application-Id получен без одного из этих двух AVP, то получатель ДОЛЖЕН вернуть ответ с Result-Code DIAMETER_MISSING_AVP. В ответ СЛЕДУЕТ также включить Failed-AVP, который ДОЛЖЕН содержать пример AVP Auth-Application-Id и AVP Acct-Application-Id.
+		//
+		//Если получен AVP Vendor-Specific-Application-Id, содержащий оба идентификатора Auth-Application-Id и Acct-Application-Id, то получатель ДОЛЖЕН выдать ответ с Result-Code DIAMETER_AVP_OCCURS_TOO_MANY_TIMES. В ответ СЛЕДУЕТ также включить два Failed-AVP, которые содержат полученные AVP Auth-Application-Id и Acct-Application-Id.
 		VendorSpecificApplicationID: []*diam.AVP{
 			diam.NewAVP(avp.VendorSpecificApplicationID, avp.Mbit, 0, &diam.GroupedAVP{
 				AVP: []*diam.AVP{
-					diam.NewAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(4)),                   //16777302
-					diam.NewAVP(avp.VendorID, avp.Mbit, 0, datatype.Unsigned32(data.PETER_SERVICE_VENDOR_ID)), //10415
+					diam.NewAVP(avp.VendorID, avp.Mbit, 0, datatype.Unsigned32(data.PETER_SERVICE_VENDOR_ID)),
+					diam.NewAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(4)),
+					//diam.NewAVP(avp.AcctApplicationID, avp.Mbit, 0, datatype.Unsigned32(4)),
+				},
+			}),
+		},
+		SupportedVendorID: []*diam.AVP{
+			diam.NewAVP(avp.VendorSpecificApplicationID, avp.Mbit, 0, &diam.GroupedAVP{
+				AVP: []*diam.AVP{
+					diam.NewAVP(avp.VendorID, avp.Mbit, 0, datatype.Unsigned32(data.PETER_SERVICE_VENDOR_ID)),
+					diam.NewAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(4)),
 				},
 			}),
 		},
@@ -518,23 +542,19 @@ func StartDiameterClient() {
 	mux.Handle("CCA", handleCCA(BrtDiamChannelAnswer))
 
 	// networkType - protocol type tcp/sctp
-	// Пока прописал в явном виде один адрес
-	/*connect := func() (diam.Conn, error) {
-		return dial(cli, "10.199.112.194:4868", "", "", false, "tcp")
-	}*/
 
 	cli.EnableWatchdog = true
 
 	brt_connect := make([]diam.Conn, len(brt_adress))
 
-	for _, init_connect := range cfg.Common.BRT {
+	for _, init_connect := range global_cfg.Common.BRT {
 		ProcessDebug(init_connect)
 
 		var err error
 
 		log.Println("Connecting clients...")
 		for i := 0; i < len(brt_adress); i++ {
-			brt_connect[i], err = Dial(cli, init_connect+":"+strconv.Itoa(cfg.Common.BRT_port), "", "", false, "tcp")
+			brt_connect[i], err = Dial(cli, init_connect+":"+strconv.Itoa(global_cfg.Common.BRT_port), "", "", false, "tcp")
 			if err != nil {
 				log.Println("Connect error ")
 				log.Fatal(err)
@@ -553,23 +573,24 @@ func StartDiameterClient() {
 // Определение шифрование соединения
 func Dial(cli *sm.Client, addr, cert, key string, ssl bool, networkType string) (diam.Conn, error) {
 	if ssl {
-		return cli.DialNetworkTLS(networkType, addr, cert, key)
+		return cli.DialNetworkTLS(networkType, addr, cert, key, nil)
 	}
 	return cli.DialNetwork(networkType, addr)
 }
 
 //Обработчик-ответа Диаметра
 func handleCCA(done chan struct{}) diam.HandlerFunc {
-	ok := struct{}{}
+	//ok := struct{}{}
 	return func(c diam.Conn, m *diam.Message) {
-		done <- ok
-		log.Println(m)
+		//done <- ok
+		ProcessDebug(m)
 	}
 }
 
 //вынести. если будет использоваться
 type dialFunc func() (diam.Conn, error)
 
+// скорее всего удалить
 func StartDiameterClientThread(df dialFunc, cfg *sm.Settings, done chan struct{}) {
 	var err error
 	//Один коннект
@@ -598,7 +619,9 @@ func SendCCREvent(c diam.Conn, cfg *sm.Settings, in <-chan struct{}) {
 	// заменить на просто вывод в лог
 	meta, ok := smpeer.FromContext(c.Context())
 	if !ok {
-		log.Fatal("Client connection does not contain metadata")
+		log.Println("Client connection does not contain metadata")
+		log.Println("Close threads")
+		return
 	}
 	var err error
 	var m *diam.Message
@@ -613,6 +636,8 @@ func SendCCREvent(c diam.Conn, cfg *sm.Settings, in <-chan struct{}) {
 		m.NewAVP(avp.AccountingRecordNumber, avp.Mbit, 0,
 			datatype.Unsigned32(i))
 		m.NewAVP(avp.DestinationHost, avp.Mbit, 0, meta.OriginHost)
+		m.NewAVP(avp.CCRequestType, avp.Mbit, 0, datatype.Enumerated(416))
+
 		if _, err = m.WriteTo(c); err != nil {
 			log.Fatal(err)
 		}
@@ -643,7 +668,7 @@ func LogWrite(err error) {
 }
 
 // Запись ошибок из горутин
-func LogWriteForGoRutine(err <-chan error) {
+func LogWriteForGoRutine(err chan error) {
 	for err := range err {
 		log.Println(err)
 	}
@@ -651,14 +676,31 @@ func LogWriteForGoRutine(err <-chan error) {
 
 // Запись ошибок из горутин для диаметра
 func DiamPrintErrors(ec <-chan *diam.ErrorReport) {
+	//удалить?
+	datetime := time.Now().UTC().Format("2006/02/01 03:04:05 ")
+	log.SetPrefix(datetime + "DIAM: ")
+	log.SetFlags(0)
 	for err := range ec {
 		log.Println(err)
 	}
 }
 
 // Запись в лог при включенном дебаге
+// Сделать горутиной?
 func ProcessDebug(logtext interface{}) {
 	if debugm {
+		// изменить интерыейс?
+		datetime := time.Now().UTC().Format("2006/02/01 03:04:05 ")
+		log.SetPrefix(datetime + "DEBUG: ")
+		log.SetFlags(0)
 		log.Println(logtext)
+		log.SetPrefix("")
+		log.SetFlags(log.Ldate | log.Ltime)
 	}
+}
+
+// Нештатное завершение при критичной ошибке
+func ProcessError(err error) {
+	fmt.Println(err)
+	os.Exit(2)
 }

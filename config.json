@@ -12,7 +12,8 @@
        "output_duration":1,
        "Duration":20,
        "BRT": ["10.199.112.194","10.199.112.193"],
-       "BRT_port": 4868
+       "BRT_port": 4868,
+       "CAMEL_port": 4868
     },
     "tasks":[
        {

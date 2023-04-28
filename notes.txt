@@ -1,6 +1,0 @@
-прописать в конфиге для каждого типа вызова 
-service contex id 
-service code, service type
-сервис тайп у интернета 02
-
-

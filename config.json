@@ -98,8 +98,8 @@
           ],
           "datapool_csv_file":"./calls_local_macr_id_200.csv",
           "paths_to_save":[
-             "C:/Temp/1/",
-             "C:/Temp/2/"
+             "/home/egor/tmp/1",
+             "/home/egor/tmp/2/"
           ],
           "template_save_file" : "calls_{date}.csv",
           "cdr_pattern": "{rec_type},{rec_number},,,{imsi},{msisdn},79397106080,{datetime},6,,,,,,,{type_ser},{type_code},,,6362,750,6362,750,,,,,,,,,,,,,,,"
@@ -162,8 +162,8 @@
           ],
           "datapool_csv_file":"./calls_roam_macr_id_200.csv",
           "paths_to_save":[
-            "C:/Temp/1/",
-            "C:/Temp/2/"
+            "/home/egor/tmp/1",
+            "/home/egor/tmp/2/"
           ],
           "template_save_file" : "roam_{date}.csv",
           "cdr_pattern": "{rec_type},{rec_number},,,{imsi},{msisdn},9959987025,{datetime},126,,05,,,352022064861160,,{type_ser},{type_code},,,135,,,,,,,9959987025,,05,008DB619,,,,GEOMA,+0300,,,995322170000,0,0,0,,,,,,,,RC0003963113.xml,,,,0,0,0,0,1510065489088647,0,1"

@@ -17,11 +17,13 @@ type Config struct {
 }
 
 type CommonType struct {
-	Duration   int
-	BRT        []string
-	BRT_port   int
-	CAMEL_port int
-	DateRange  struct {
+	Duration        int
+	BRT             []string
+	BRT_port        int
+	BRT_OriginHost  string
+	BRT_OriginRealm string
+	CAMEL_port      int
+	DateRange       struct {
 		Start string `json:"start"`
 		End   string `json:"end"`
 		Freq  string `json:"freq"`
@@ -34,25 +36,35 @@ type CommonType struct {
 }
 
 type TasksType struct {
-	Name               string             `json:"Name,omitempty"`
-	CallsPerSecond     int                `json:"calls_per_second"`
-	RecTypeRatio       []RecTypeRatioType `json:"rec_type_ratio"`
-	Percentile         []float64          `json:"percentile"`
-	CallsRange         []int              `json:"calls_range"`
-	DatapoolCsvFile    string             `json:"datapool_csv_file"`
-	PathsToSave        []string           `json:"paths_to_save"`
-	Template_save_file string             `json:"template_save_file"`
-	CDR_pattern        string             `json:"cdr_pattern"`
+	// Имя задачи
+	Name string `json:"Name,omitempty"`
+	// рейт
+	CallsPerSecond int `json:"calls_per_second"`
+	// Тип записи
+	RecTypeRatio []RecTypeRatioType `json:"rec_type_ratio"`
+	// Два параметра определяющее количество звонков на абоненте с распределением по процентам
+	Percentile []float64 `json:"percentile"`
+	CallsRange []int     `json:"calls_range"`
+	// имя файла датапула
+	DatapoolCsvFile string `json:"datapool_csv_file"`
+	// Путь для сохранения файлов
+	PathsToSave []string `json:"paths_to_save"`
+	// Шаблон сохранения файла
+	Template_save_file string `json:"template_save_file"`
+	// Паттерн для для СДР
+	CDR_pattern string `json:"cdr_pattern"`
 }
 
 //Тип структуры описания логического вызова, сервис кодов
 type RecTypeRatioType struct {
-	Name     string `json:"name"`
-	Rate     int    `json:"rate"`
-	TypeSer  string `json:"type_ser"`
-	TypeCode string `json:"type_code"`
-	RangeMin int
-	RangeMax int
+	Record_type      string `json:"record_type"`
+	Name             string `json:"name"`
+	Rate             int    `json:"rate"`
+	TypeService      string `json:"type_service"`
+	TypeCode         string `json:"type_code"`
+	ServiceContextId string `json:"service_context_id"`
+	RangeMin         int
+	RangeMax         int
 }
 
 //Структура строки пула
@@ -88,6 +100,7 @@ func HelpStart() {
 	fmt.Println("Use -s stop deamon mode")
 	fmt.Println("Use -debug start with debug mode")
 	fmt.Println("Use -file save cdr to files")
+	fmt.Println("Use -brt message(cdr) transmission by diameter to the billing server ")
 }
 
 //Заполнение массива для последующей генерации нагрузки
@@ -140,21 +153,21 @@ func FloatToString(input_num float64) string {
 
 //Формирование записи для CDR
 //Формируется из шаблона с заменой
-func CreateCDRRecord(RecordMsisdn RecTypePool, date time.Time, RecordType RecTypeRatioType, cfg string) string {
+func CreateCDRRecord(RecordMsisdn RecTypePool, date time.Time, RecordType RecTypeRatioType, cfg string) (string, error) {
 	// Номер записи, добавить генерацию
 	rec_number := time.Now().Format("0201030405")
 	//TasksType.CDR_pattern
 	CDR_pattern := cfg
 
-	CDR_pattern = strings.Replace(CDR_pattern, "{rec_type}", RecordType.Name, 1)
+	CDR_pattern = strings.Replace(CDR_pattern, "{rec_type}", RecordType.Record_type, 1)
 	CDR_pattern = strings.Replace(CDR_pattern, "{type_code}", RecordType.TypeCode, 1)
-	CDR_pattern = strings.Replace(CDR_pattern, "{type_ser}", RecordType.TypeSer, 1)
+	CDR_pattern = strings.Replace(CDR_pattern, "{type_ser}", RecordType.TypeService, 1)
 	CDR_pattern = strings.Replace(CDR_pattern, "{imsi}", RecordMsisdn.IMSI, 1)
 	CDR_pattern = strings.Replace(CDR_pattern, "{msisdn}", RecordMsisdn.Msisdn, 1)
 	CDR_pattern = strings.Replace(CDR_pattern, "{rec_number}", rec_number, 1)
 	CDR_pattern = strings.Replace(CDR_pattern, "{datetime}", date.Format("20060201030405"), 1)
 
-	return CDR_pattern
+	return CDR_pattern, nil
 }
 
 // map c mutex
@@ -286,4 +299,27 @@ func (c *RecTypeCounters) LoadString(key1 string, key2 string) string {
 func ProcessError(err error) {
 	fmt.Println(err)
 	os.Exit(2)
+}
+
+// список тасков испольняемых для диаметра BRT
+type ArgListType []string
+
+func (i *ArgListType) String() string {
+	return fmt.Sprint(*i)
+}
+
+func (i *ArgListType) Set(value string) error {
+	for _, dt := range strings.Split(value, ",") {
+		*i = append(*i, dt)
+	}
+	return nil
+}
+
+func (i *ArgListType) Get(value string) bool {
+	for _, dt := range *i {
+		if dt == value {
+			return true
+		}
+	}
+	return false
 }

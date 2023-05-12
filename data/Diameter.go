@@ -1,7 +1,16 @@
 package data
 
 import (
-	"encoding/xml"
+	"log"
+	"math/rand"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/fiorix/go-diameter/v4/diam"
+	"github.com/fiorix/go-diameter/v4/diam/avp"
+	"github.com/fiorix/go-diameter/v4/diam/datatype"
+	"github.com/fiorix/go-diameter/v4/diam/dict"
 )
 
 // VENDOR_ID "Peter-Service Ltd."
@@ -28,11 +37,11 @@ const MSG_ID_DPR = 0x8000011A
 const MSG_ID_DPA = 0x0000011A
 
 //  COMMAND_CODE
-const COMMAND_CODE_Capability_Exchange = 0x00000101
-const COMMAND_CODE_Accounting_Control = 0x0000010F
-const COMMAND_CODE_Credit_Control = 0x00000110
-const COMMAND_CODE_Device_Watchdog = 0x00000118
-const COMMAND_CODE_Disconnect_Peer = 0x0000011A
+const COMMAND_CODE_Capability_Exchange uint32 = 0x00000101
+const COMMAND_CODE_Accounting_Control uint32 = 0x0000010F
+const COMMAND_CODE_Credit_Control uint32 = 0x00000110
+const COMMAND_CODE_Device_Watchdog uint32 = 0x00000118
+const COMMAND_CODE_Disconnect_Peer uint32 = 0x0000011A
 
 // AVP
 const AVP_User_Name = 0x00000001                        //1
@@ -226,46 +235,160 @@ const APPL_ID_DIAMIP = 2 // Mobile-IP				(RFC3588-11.2.2)
 const APPL_ID_DIAMBA = 3 // Diameter Base Acounting	(RFC3588-11.2.2)
 const APPL_ID_DIAMCC = 4 // Diameter Credit Control	(RFC4006-12.1)
 
-//по идее есть в экзамплах 4-272
-var HelloDictionary = xml.Header + `
-<diameter>
-	<application id="4" type="acct">
-		<command code="272" short="CC" name="Credit-Control">
-			<request>
-				<rule avp="Session-Id" required="true" max="1"/>
-				<rule avp="Origin-Host" required="true" max="1"/>
-				<rule avp="Origin-Realm" required="true" max="1"/>
-				<rule avp="Destination-Realm" required="true" max="1"/>
-				<rule avp="Destination-Host" required="false" max="1"/>
-				<rule avp="Auth-Application-Id" required="true" max="1"/>
-				<rule avp="CC-Request-Type" required="true" max="1"/>
-				<rule avp="CC-Request-Number" required="true" max="1"/>
-				<rule avp="User-Name" required="false" max="1"/>
-				<rule avp="Product-Name" required="false" max="1"/>
-				<rule avp="Origin-State-Id" required="false" max="1"/>
-				<rule avp="Supported-Vendor-Id" required="false" max="1"/>
-				<rule avp="Inband-Security-Id" required="false" max="1"/>
-				<rule avp="Acct-Application-Id" required="false" max="1"/>
-				<rule avp="Vendor-Specific-Application-Id" required="false" max="1"/>
-				<rule avp="Firmware-Revision" required="false" max="1"/>
+const (
+	// acronyms for Diameter Answer commands
+	DIAMETER_COMMAND_CEA_ACRONYM = "CEA"
+	DIAMETER_COMMAND_DWA_ACRONYM = "DWA"
+	DIAMETER_COMMAND_DPA_ACRONYM = "DPA"
+	DIAMETER_COMMAND_ACA_ACRONYM = "ACA"
+	DIAMETER_COMMAND_RAA_ACRONYM = "RAA"
+	DIAMETER_COMMAND_ASA_ACRONYM = "ASA"
+	DIAMETER_COMMAND_STA_ACRONYM = "STA"
+	DIAMETER_COMMAND_CCA_ACRONYM = "CCA"
 
-			</request>
-			<answer>
-				<rule avp="Session-Id" required="true" max="1"/>
-				<rule avp="Result-Code" required="true" max="1"/>
-				<rule avp="Origin-Host" required="true" max="1"/>
-				<rule avp="Origin-Realm" required="true" max="1"/>
-				<rule avp="CC-Request-Type" required="true" max="1"/>
-				<rule avp="CC-Request-Number" required="true" max="1"/>
-				<rule avp="Error-Message" required="false" max="1"/>
-				<rule avp="Auth-Application-Id" required="false" max="1"/>
-				<rule avp="Inband-Security-Id" required="false" max="1"/>
-				<rule avp="Acct-Application-Id" required="false" max="1"/>
-				<rule avp="Vendor-Specific-Application-Id" required="false" max="1"/>
-				<rule avp="Firmware-Revision" required="false" max="1"/>
+	// result codes (enum for result-code AVP)
+	DIAMETER_RESULT_MULTI_ROUND_AUTH          = 1001
+	DIAMETER_RESULT_SUCCESS                   = 2001
+	DIAMETER_RESULT_LIMITED_SUCCESS           = 2002
+	DIAMETER_RESULT_CONTEXT_ONLY              = 2103
+	DIAMETER_RESULT_COMMAND_UNSUPPORTED       = 3001
+	DIAMETER_RESULT_UNABLE_TO_DELIVER         = 3002
+	DIAMETER_RESULT_REALM_NOT_SERVED          = 3003
+	DIAMETER_RESULT_TOO_BUSY                  = 3004
+	DIAMETER_RESULT_LOOP_DETECTED             = 3005
+	DIAMETER_RESULT_REDIRECT_INDICATION       = 3006
+	DIAMETER_RESULT_APPLICATION_UNSUPPORTED   = 3007
+	DIAMETER_RESULT_INVALID_HDR_BITS          = 3008
+	DIAMETER_RESULT_INVALID_AVP_BITS          = 3009
+	DIAMETER_RESULT_UNKNOWN_PEER              = 3010
+	DIAMETER_RESULT_AUTHENTICATION_REJECTED   = 4001
+	DIAMETER_RESULT_OUT_OF_SPACE              = 4002
+	DIAMETER_RESULT_ELECTION_LOST             = 4003
+	DIAMETER_RESULT_AVP_UNSUPPORTED           = 5001
+	DIAMETER_RESULT_UNKNOWN_SESSION_ID        = 5002
+	DIAMETER_RESULT_AUTHORIZATION_REJECTED    = 5003
+	DIAMETER_RESULT_INVALID_AVP_VALUE         = 5004
+	DIAMETER_RESULT_MISSING_AVP               = 5005
+	DIAMETER_RESULT_RESOURCES_EXCEEDED        = 5006
+	DIAMETER_RESULT_CONTRADICTING_AVPS        = 5007
+	DIAMETER_RESULT_AVP_NOT_ALLOWED           = 5008
+	DIAMETER_RESULT_AVP_OCCURS_TOO_MANY_TIMES = 5009
+	DIAMETER_RESULT_NO_COMMON_APPLICATION     = 5010
+	DIAMETER_RESULT_UNSUPPORTED_VERSION       = 5011
+	DIAMETER_RESULT_UNABLE_TO_COMPLY          = 5012
+	DIAMETER_RESULT_INVALID_BIT_IN_HEADER     = 5013
+	DIAMETER_RESULT_INVALID_AVP_LENGTH        = 5014
+	DIAMETER_RESULT_INVALID_MESSAGE_LENGTH    = 5015
+	DIAMETER_RESULT_INVALID_AVP_BIT_COMBO     = 5016
+	DIAMETER_RESULT_NO_COMMON_SECURITY        = 5017
+)
 
-			</answer>
-		</command>
-	</application>
-</diameter>
-`
+type DiamCH struct {
+	TaskName string
+	Message  *diam.Message
+}
+
+// Формирование сообщения
+func CreateCCREventMessage(Msisdn RecTypePool, date time.Time, RecordType RecTypeRatioType, dict *dict.Parser) (*diam.Message, error) {
+	sid := "session;" + strconv.Itoa(int(rand.Uint32()))
+	diam_message := diam.NewRequest(COMMAND_CODE_Credit_Control, 4, dict)
+	diam_message.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String(sid))
+
+	//{ Auth-Application-Id }
+	diam_message.NewAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(4))
+	//{ Service-Context-Id } из конфига БРТ для каждого лоджик кола
+	diam_message.NewAVP(avp.ServiceContextID, avp.Mbit, 0, datatype.UTF8String("internet.volume.pcef.vpcef"))
+	//{ CC-Request-Type }
+	// Используется тип 4 (просто событие)
+	// 1- инициация, 2 обновление 3 - завершение
+	diam_message.NewAVP(avp.CCRequestType, avp.Mbit, 0, datatype.Enumerated(REQUEST_TYPE_EVENT_REQUEST))
+	//{ CC-Request-Number } Растет от 0 до .. в зависимости от текущей сессии
+	diam_message.NewAVP(avp.CCRequestNumber, avp.Mbit, 0, datatype.Unsigned32(0))
+
+	//Передаем идентификатор и имси абонента
+	diam_message.NewAVP(avp.SubscriptionID, avp.Mbit, 0, &diam.GroupedAVP{
+		AVP: []*diam.AVP{
+			diam.NewAVP(avp.SubscriptionIDType, avp.Mbit, 0, datatype.Enumerated(0)),
+			diam.NewAVP(avp.SubscriptionIDData, avp.Mbit, 0, datatype.UTF8String("79251470282")),
+		},
+	})
+	diam_message.NewAVP(avp.SubscriptionID, avp.Mbit, 0, &diam.GroupedAVP{
+		AVP: []*diam.AVP{
+			diam.NewAVP(avp.SubscriptionIDType, avp.Mbit, 0, datatype.Enumerated(1)),
+			diam.NewAVP(avp.SubscriptionIDData, avp.Mbit, 0, datatype.UTF8String("250020153589056")),
+		},
+	})
+	diam_message.NewAVP(avp.UserName, avp.Mbit, 0, datatype.UTF8String("79251470282"))
+	//{ Event-Timestamp }  Время события
+	diam_message.NewAVP(avp.EventTimestamp, avp.Mbit, 0, datatype.Time(time.Now()))
+	//{ Multiple-Services-Indicator } Нужен?
+	diam_message.NewAVP(avp.MultipleServicesIndicator, avp.Mbit, 0, datatype.Enumerated(1))
+	// { Requested-Action } Безусловное списание 0
+	diam_message.NewAVP(avp.RequestedAction, avp.Mbit, 0, datatype.Enumerated(0))
+	// { Multiple-Services-Credit-Control }
+	diam_message.NewAVP(avp.MultipleServicesCreditControl, avp.Mbit, 0, &diam.GroupedAVP{
+		AVP: []*diam.AVP{
+			// Requested-Service-Unit
+			diam.NewAVP(avp.RequestedServiceUnit, avp.Mbit, 0, &diam.GroupedAVP{
+				AVP: []*diam.AVP{
+					diam.NewAVP(avp.CCTime, avp.Mbit, 0, datatype.Unsigned32(rand.Intn(100))),
+				},
+			}),
+		},
+	})
+
+	// { Service-Information }
+	/*diam_message.NewAVP(avp.ServiceInformation, avp.Mbit, 10415, &diam.GroupedAVP{
+		AVP: []*diam.AVP{
+			diam.NewAVP(avp.PSInformation, avp.Mbit, 10415, &diam.GroupedAVP{
+				AVP: []*diam.AVP{
+					diam.NewAVP(avp.CallingStationID, avp.Mbit, 0, datatype.UTF8String("1dfgd")),
+				},
+			}),
+		},
+	})*/
+	return diam_message, nil
+}
+
+// Обработчик ответа
+func ResponseDiamHandler(message *diam.Message, log *log.Logger, debug bool) {
+
+	op := ""
+	cmd, err := message.Dictionary().FindCommand(
+		message.Header.ApplicationID,
+		message.Header.CommandCode,
+	)
+	if err != nil {
+		op += "unknown_command"
+	} else {
+		op += cmd.Short + "A"
+	}
+
+	// выделение кода ответа
+	mm, _ := message.FindAVPs(268, 0)
+	//var diamcode string
+	ans := "DIAM: Answer " + op + " code:"
+
+	for _, i := range mm {
+		ans += ConvertType(i) + ";"
+	}
+
+	log.Println(ans)
+	// Текст ошибки
+	mm, _ = message.FindAVPs(avp.ErrorMessage, 0)
+	for _, i := range mm {
+		log.Println("ERROR: " + ConvertType(i))
+	}
+}
+
+// Конвертер для ошибок в строку
+func ConvertType(m *diam.AVP) string {
+	switch m.Data.Type() {
+	case 16:
+		replacer := strings.NewReplacer("Unsigned32{", "", "}", "")
+		return replacer.Replace(m.Data.String())
+	default:
+		return m.Data.String()
+	}
+
+}

@@ -10,9 +10,11 @@
           "steps":20
        },
        "output_duration":1,
-       "Duration":20,
-       "BRT": ["10.199.112.194","10.199.112.193"],
+       "Duration":40,
+       "BRT": ["10.199.112.193","10.199.112.194"],
        "BRT_port": 4868,
+       "BRT_OriginHost": "ctf-util1",
+       "BRT_OriginRealm": "ocsgf.msk.megafon.ru",
        "CAMEL_port": 4868
     },
     "tasks":[
@@ -21,51 +23,60 @@
           "calls_per_second":4000,
           "rec_type_ratio":[
              {
-                "name":"70",
+                "record_type":"70",
+                "name": "Internet",
                 "rate":57,
-                "type_ser" : "02",
-                "type_code" : "60"
+                "type_service" : "02",
+                "type_code" : "60",
+                "service_context_id": "internet.volume.pcef.vpcef"
              },
              {
-                "name":"09",
+                "record_type":"09",
+                "name": "Incoming SMS",
                 "rate":10,
-                "type_ser" : "00",
+                "type_service" : "00",
                 "type_code" : "21"
              },
              {
-                "name":"01",
+                "record_type":"01",
+                "name": "Outgoing Voice",
                 "rate":9,
-                "type_ser" : "00",
+                "type_service" : "00",
                 "type_code" : "11"
              },
              {
-                "name":"72",
+                "record_type":"72",
+                "name":"72-33-33",
                 "rate":6,
-                "type_ser" : "33",
+                "type_service" : "33",
                 "type_code" : "33"
              },
              {
-                "name":"02",
+                "record_type":"02",
+                "name": "Incoming Voice",
                 "rate":5,
-                "type_ser" : "00",
+                "type_service" : "00",
                 "type_code" : "11"
              },
              {
-                "name":"02",
+                "record_type":"02",
+                "name": "Incoming Voice 03-11",
                 "rate":5,
-                "type_ser" : "03",
+                "type_service" : "03",
                 "type_code" : "11"
              },
              {
-                "name":"92",
+                "record_type":"92",
+                "name":"92-02-00",
                 "rate":5,
-                "type_ser" : "02",
+                "type_service" : "02",
                 "type_code" : "00"
              },
              {
-               "name":"02",
+               "record_type":"02",
+               "name": "Incoming Voice 00-11",
                "rate":3,
-               "type_ser" : "00",
+               "type_service" : "00",
                "type_code" : "11"
             }
           ],
@@ -98,33 +109,38 @@
           "calls_per_second":1000,
           "rec_type_ratio":[
              {
-                "name":"01",
+                "record_type":"01",
+                "name":"01-00-11",
                 "rate":20,
-                "type_ser" : "00",
+                "type_service" : "00",
                 "type_code" : "11"
              },
              {
-                "name":"02",
+                "record_type":"02",
+                "name":"02-00-11",
                 "rate":20,
-                "type_ser" : "00",
+                "type_service" : "00",
                 "type_code" : "11"
              },
              {
-                "name":"08",
+                "record_type":"08",
+                "name":"08-00-11",
                 "rate":40,
-                "type_ser" : "00",
+                "type_service" : "00",
                 "type_code" : "11"
              },
              {
-                "name":"09",
+                "record_type":"09",
+                "name":"09-00-11",
                 "rate":10,
-                "type_ser" : "00",
+                "type_service" : "00",
                 "type_code" : "11"
              },
              {
-                "name":"70",
+                "record_type":"70",
+                "name":"70-01-60",
                 "rate":10,
-                "type_ser" : "01",
+                "type_service" : "01",
                 "type_code" : "60"
              }
           ],

@@ -1,6 +1,7 @@
 package data
 
 import (
+	"errors"
 	"log"
 	"math/rand"
 	"strconv"
@@ -289,7 +290,9 @@ type DiamCH struct {
 }
 
 // Формирование сообщения
-func CreateCCREventMessage(Msisdn RecTypePool, date time.Time, RecordType RecTypeRatioType, dict *dict.Parser) (*diam.Message, error) {
+func CreateCCREventMessage(Msisdn RecTypePool, date time.Time, RecordType RecTypeRatioType, dict *dict.Parser) (*diam.Message, string, error) {
+	// Описание что добавить RatingGroup - может быть списком
+
 	sid := "session;" + strconv.Itoa(int(rand.Uint32()))
 	diam_message := diam.NewRequest(COMMAND_CODE_Credit_Control, 4, dict)
 	diam_message.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String(sid))
@@ -297,7 +300,11 @@ func CreateCCREventMessage(Msisdn RecTypePool, date time.Time, RecordType RecTyp
 	//{ Auth-Application-Id }
 	diam_message.NewAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(4))
 	//{ Service-Context-Id } из конфига БРТ для каждого лоджик кола
-	diam_message.NewAVP(avp.ServiceContextID, avp.Mbit, 0, datatype.UTF8String("internet.volume.pcef.vpcef"))
+	if RecordType.ServiceContextId != "" {
+		diam_message.NewAVP(avp.ServiceContextID, avp.Mbit, 0, datatype.UTF8String(RecordType.ServiceContextId))
+	} else {
+		return nil, "", errors.New("Not use empty ServiceContextId")
+	}
 	//{ CC-Request-Type }
 	// Используется тип 4 (просто событие)
 	// 1- инициация, 2 обновление 3 - завершение
@@ -309,45 +316,119 @@ func CreateCCREventMessage(Msisdn RecTypePool, date time.Time, RecordType RecTyp
 	diam_message.NewAVP(avp.SubscriptionID, avp.Mbit, 0, &diam.GroupedAVP{
 		AVP: []*diam.AVP{
 			diam.NewAVP(avp.SubscriptionIDType, avp.Mbit, 0, datatype.Enumerated(0)),
+			//diam.NewAVP(avp.SubscriptionIDData, avp.Mbit, 0, datatype.UTF8String(Msisdn.Msisdn)), //"79251470282")),
 			diam.NewAVP(avp.SubscriptionIDData, avp.Mbit, 0, datatype.UTF8String("79251470282")),
 		},
 	})
 	diam_message.NewAVP(avp.SubscriptionID, avp.Mbit, 0, &diam.GroupedAVP{
 		AVP: []*diam.AVP{
 			diam.NewAVP(avp.SubscriptionIDType, avp.Mbit, 0, datatype.Enumerated(1)),
+			//diam.NewAVP(avp.SubscriptionIDData, avp.Mbit, 0, datatype.UTF8String(Msisdn.IMSI)), //"250020153589056")),
 			diam.NewAVP(avp.SubscriptionIDData, avp.Mbit, 0, datatype.UTF8String("250020153589056")),
 		},
 	})
+	//diam_message.NewAVP(avp.UserName, avp.Mbit, 0, datatype.UTF8String(Msisdn.Msisdn)) //"79251470282"))
 	diam_message.NewAVP(avp.UserName, avp.Mbit, 0, datatype.UTF8String("79251470282"))
+
 	//{ Event-Timestamp }  Время события
 	diam_message.NewAVP(avp.EventTimestamp, avp.Mbit, 0, datatype.Time(time.Now()))
-	//{ Multiple-Services-Indicator } Нужен?
+	//{ Multiple-Services-Indicator }
 	diam_message.NewAVP(avp.MultipleServicesIndicator, avp.Mbit, 0, datatype.Enumerated(1))
 	// { Requested-Action } Безусловное списание 0
 	diam_message.NewAVP(avp.RequestedAction, avp.Mbit, 0, datatype.Enumerated(0))
-	// { Multiple-Services-Credit-Control }
-	diam_message.NewAVP(avp.MultipleServicesCreditControl, avp.Mbit, 0, &diam.GroupedAVP{
-		AVP: []*diam.AVP{
-			// Requested-Service-Unit
-			diam.NewAVP(avp.RequestedServiceUnit, avp.Mbit, 0, &diam.GroupedAVP{
-				AVP: []*diam.AVP{
-					diam.NewAVP(avp.CCTime, avp.Mbit, 0, datatype.Unsigned32(rand.Intn(100))),
-				},
-			}),
-		},
-	})
+	//diam.NewAVP(avp.RatingGroup, avp.Mbit, 0, datatype.Unsigned32(0))
 
-	// { Service-Information }
-	/*diam_message.NewAVP(avp.ServiceInformation, avp.Mbit, 10415, &diam.GroupedAVP{
-		AVP: []*diam.AVP{
-			diam.NewAVP(avp.PSInformation, avp.Mbit, 10415, &diam.GroupedAVP{
+	// { Multiple-Services-Credit-Control } Используется для сессий
+	// SMS
+	switch RecordType.MeasureType {
+	case "SPECIFIC":
+		{
+			diam_message.NewAVP(avp.MultipleServicesCreditControl, avp.Mbit, 0, &diam.GroupedAVP{
 				AVP: []*diam.AVP{
-					diam.NewAVP(avp.CallingStationID, avp.Mbit, 0, datatype.UTF8String("1dfgd")),
+					// Requested-Service-Unit
+					diam.NewAVP(avp.RequestedServiceUnit, avp.Mbit, 0, &diam.GroupedAVP{
+						AVP: []*diam.AVP{
+							//Для СМС.
+							diam.NewAVP(avp.CCServiceSpecificUnits, avp.Mbit, 0, datatype.Unsigned64(1)),
+						},
+					}),
+					//{ Service-Identifier }
+					// diam_message.NewAVP(avp.ServiceIdentifier, avp.Mbit, 0, datatype.Unsigned32(60)),
+					diam.NewAVP(avp.RatingGroup, avp.Mbit, 0, datatype.Unsigned32(RecordType.RatingGroup)),
 				},
-			}),
-		},
-	})*/
-	return diam_message, nil
+			})
+			// { Service-Information }
+			diam_message.NewAVP(avp.ServiceInformation, avp.Mbit, 10415, &diam.GroupedAVP{
+				AVP: []*diam.AVP{
+					diam.NewAVP(avp.SMSInformation, avp.Mbit, 10415, &diam.GroupedAVP{
+						AVP: []*diam.AVP{
+							diam.NewAVP(avp.SMSNode, avp.Mbit, 10415, datatype.Enumerated(0)),
+						},
+					}),
+				},
+			})
+		}
+	case "SECONDS":
+		{
+			//голос
+			diam_message.NewAVP(avp.MultipleServicesCreditControl, avp.Mbit, 0, &diam.GroupedAVP{
+				AVP: []*diam.AVP{
+					// Requested-Service-Unit
+					diam.NewAVP(avp.RequestedServiceUnit, avp.Mbit, 0, &diam.GroupedAVP{
+						AVP: []*diam.AVP{
+							//Для интернета октеты.
+							diam.NewAVP(avp.CCTime, avp.Mbit, 0, datatype.Unsigned32(rand.Intn(999))),
+						},
+					}),
+					diam.NewAVP(avp.RatingGroup, avp.Mbit, 0, datatype.Unsigned32(RecordType.RatingGroup)),
+				},
+			})
+			// { Service-Information }
+			diam_message.NewAVP(avp.ServiceInformation, avp.Mbit, 10415, &diam.GroupedAVP{
+				AVP: []*diam.AVP{
+					diam.NewAVP(avp.PSInformation, avp.Mbit, 10415, &diam.GroupedAVP{
+						AVP: []*diam.AVP{
+							diam.NewAVP(avp.CallingStationID, avp.Mbit, 0, datatype.UTF8String("internet.volume.pcef.vpcef")),
+							//diam.NewAVP(avp. , avp.Mbit, 10415, datatype.IPv4{})
+							//3GPP-PDP-Type
+							//diam.NewAVP(avp.SGSNAddress, avp.Mbit, 10415, datatype.IPv4{}),
+						},
+					}),
+				},
+			})
+		}
+	default:
+		{
+			//Интернет
+			diam_message.NewAVP(avp.MultipleServicesCreditControl, avp.Mbit, 0, &diam.GroupedAVP{
+				AVP: []*diam.AVP{
+					// Requested-Service-Unit
+					diam.NewAVP(avp.RequestedServiceUnit, avp.Mbit, 0, &diam.GroupedAVP{
+						AVP: []*diam.AVP{
+							//Для интернета октеты.
+							diam.NewAVP(avp.CCTotalOctets, avp.Mbit, 0, datatype.Unsigned64(rand.Intn(1000))),
+						},
+					}),
+					diam.NewAVP(avp.RatingGroup, avp.Mbit, 0, datatype.Unsigned32(RecordType.RatingGroup)),
+				},
+			})
+			// { Service-Information }
+			diam_message.NewAVP(avp.ServiceInformation, avp.Mbit, 10415, &diam.GroupedAVP{
+				AVP: []*diam.AVP{
+					diam.NewAVP(avp.PSInformation, avp.Mbit, 10415, &diam.GroupedAVP{
+						AVP: []*diam.AVP{
+							diam.NewAVP(avp.CallingStationID, avp.Mbit, 0, datatype.UTF8String("internet.volume.pcef.vpcef")),
+							//diam.NewAVP(avp. , avp.Mbit, 10415, datatype.IPv4{})
+							//3GPP-PDP-Type
+							//diam.NewAVP(avp.SGSNAddress, avp.Mbit, 10415, datatype.IPv4{}),
+						},
+					}),
+				},
+			})
+		}
+	}
+
+	return diam_message, sid, nil
 }
 
 // Обработчик ответа
@@ -368,9 +449,16 @@ func ResponseDiamHandler(message *diam.Message, log *log.Logger, debug bool) {
 	mm, _ := message.FindAVPs(268, 0)
 	//var diamcode string
 	ans := "DIAM: Answer " + op + " code:"
-
+	resp_code := 0
+	s := 0
 	for _, i := range mm {
-		ans += ConvertType(i) + ";"
+		t := ConvertType(i)
+		ans += t + ";"
+		if s, err = strconv.Atoi(t); s > resp_code {
+			if err == nil {
+				resp_code = s
+			}
+		}
 	}
 
 	log.Println(ans)
@@ -379,6 +467,17 @@ func ResponseDiamHandler(message *diam.Message, log *log.Logger, debug bool) {
 	for _, i := range mm {
 		log.Println("ERROR: " + ConvertType(i))
 	}
+
+	if s == 4011 {
+		m, _ := message.FindAVP(263, 0)
+		log.Println(ConvertType(m))
+		log.Println(m.Data.String())
+		log.Println(m.String())
+		log.Println(m.Serialize())
+	}
+	if s != 2001 {
+		log.Println(message)
+	}
 }
 
 // Конвертер для ошибок в строку
@@ -386,6 +485,10 @@ func ConvertType(m *diam.AVP) string {
 	switch m.Data.Type() {
 	case 16:
 		replacer := strings.NewReplacer("Unsigned32{", "", "}", "")
+		return replacer.Replace(m.Data.String())
+	case 15:
+		replacer := strings.NewReplacer("UTF8String{", "", "}", "")
+
 		return replacer.Replace(m.Data.String())
 	default:
 		return m.Data.String()

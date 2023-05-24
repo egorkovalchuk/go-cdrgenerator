@@ -107,4 +107,5 @@ func InitVariables() {
 	for _, ip := range global_cfg.Common.BRT {
 		CDRBRTCount.Store(ip, 0)
 	}
+
 }

@@ -28,28 +28,36 @@
                 "rate":57,
                 "type_service" : "02",
                 "type_code" : "60",
-                "service_context_id": "internet.volume.pcef.vpcef"
+                "service_context_id": "internet.volume.pcef.vpcef",
+                "measure":"OCTETS",
+                "rating_group": 1000
              },
              {
                 "record_type":"09",
                 "name": "Incoming SMS",
                 "rate":10,
                 "type_service" : "00",
-                "type_code" : "21"
+                "type_code" : "21",
+                "service_context_id": "mtsms.event",
+                "measure":"SPECIFIC"
              },
              {
                 "record_type":"01",
                 "name": "Outgoing Voice",
                 "rate":9,
                 "type_service" : "00",
-                "type_code" : "11"
+                "type_code" : "11",
+                "measure":"SECONDS"
              },
              {
                 "record_type":"72",
                 "name":"72-33-33",
                 "rate":6,
                 "type_service" : "33",
-                "type_code" : "33"
+                "type_code" : "33",
+                "service_context_id": "internet.volume.pcef.vpcef",
+                "measure":"OCTETS",
+                "rating_group": 368
              },
              {
                 "record_type":"02",
@@ -77,7 +85,10 @@
                "name": "Incoming Voice 00-11",
                "rate":3,
                "type_service" : "00",
-               "type_code" : "11"
+               "type_code" : "11",
+               "service_context_id": "vats.megafon.ru",
+               "measure":"SECONDS",
+               "rating_group": 502
             }
           ],
           "percentile":[
@@ -98,8 +109,8 @@
           ],
           "datapool_csv_file":"./calls_local_macr_id_200.csv",
           "paths_to_save":[
-             "/home/egor/tmp/1",
-             "/home/egor/tmp/2/"
+             "C:/Temp/1/",
+             "C:/Temp/2/"
           ],
           "template_save_file" : "calls_{date}.csv",
           "cdr_pattern": "{rec_type},{rec_number},,,{imsi},{msisdn},79397106080,{datetime},6,,,,,,,{type_ser},{type_code},,,6362,750,6362,750,,,,,,,,,,,,,,,"
@@ -162,8 +173,8 @@
           ],
           "datapool_csv_file":"./calls_roam_macr_id_200.csv",
           "paths_to_save":[
-            "/home/egor/tmp/1",
-            "/home/egor/tmp/2/"
+            "C:/Temp/1/",
+            "C:/Temp/2/"
           ],
           "template_save_file" : "roam_{date}.csv",
           "cdr_pattern": "{rec_type},{rec_number},,,{imsi},{msisdn},9959987025,{datetime},126,,05,,,352022064861160,,{type_ser},{type_code},,,135,,,,,,,9959987025,,05,008DB619,,,,GEOMA,+0300,,,995322170000,0,0,0,,,,,,,,RC0003963113.xml,,,,0,0,0,0,1510065489088647,0,1"

@@ -81,7 +81,8 @@ var (
 	CDRChanneltoFile     = make(chan string)
 	CDRRoamChanneltoFile = make(chan string)
 
-	m sync.Mutex
+	m       sync.Mutex
+	logdiam log.Logger
 
 /*
 Vesion 0.2
@@ -160,6 +161,18 @@ func main() {
 
 	InitVariables()
 
+	//Диметр в отдельный фаил
+	if brt {
+		filer1, err := os.OpenFile("diam.log", os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0666)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer filer1.Close()
+		logdiam.SetOutput(filer1)
+		logdiam.SetPrefix("")
+		logdiam.SetFlags(log.Ldate | log.Ltime)
+	}
+
 	// запуск горутины записи в лог
 	go LogWriteForGoRutine(ErrorChannel)
 	// Запуск мониторинга
@@ -185,7 +198,7 @@ func StartSimpleMode() {
 	// Добавить сигнал остановки
 
 	// Вынесено из теста. Нужна ли отдельная точка входа для роуминга?
-	if brt {
+	if brt && len(brtlist) != 0 {
 		// Запуск потока БРТ
 		// Горутина запускается из функции, по количеству серверов
 		// Поток идет только по правилу один хост один пир
@@ -227,6 +240,8 @@ func StartSimpleMode() {
 					if brt && brtlist.Get(thread.Name) {
 						log.Println("INFO: Start diameter thread for " + thread.Name)
 						go StartTaskDiam(PoolList, thread, true)
+						// Запускаем запись для офлайна - ответ брт 4011
+						// go StartTaskFile(PoolList, thread, true)
 					} else if tofile {
 						// Если пишем в фаил, в начале запускаем потоки записи в фаил или коннекта к BRT
 						// Запускать потоки записи по количеству путей? Не будет ли пересечение по именам файлов
@@ -462,15 +477,21 @@ func StartTaskDiam(PoolList []data.RecTypePool, cfg data.TasksType, FirstStart b
 					RecTypeIndex = data.RandomRecType(cfg.RecTypeRatio, rand.Intn(100))
 					CDRRecTypeCount.Inc(cfg.Name, cfg.RecTypeRatio[RecTypeIndex].Name)
 
-					diam_message, err := data.CreateCCREventMessage(PoolList[PoolIndex], time.Now(), cfg.RecTypeRatio[RecTypeIndex], dict.Default)
-					BrtDiamChannel <- data.DiamCH{TaskName: cfg.Name, Message: diam_message}
-					// Что бы не завалить на время тестов
-					time.Sleep(7 * time.Second)
-					//Для БРТ считаем здесь. Пока здесь, похоже фаил пишется дольше
-					CDRPerSec.Inc(cfg.Name)
-
+					diam_message, _, err := data.CreateCCREventMessage(PoolList[PoolIndex], time.Now(), cfg.RecTypeRatio[RecTypeIndex], dict.Default)
+					//если ответ 4011 формируется CDR
+					//помещем в массив.
 					if err != nil {
+						CDRPerSec.Inc(cfg.Name)
 						ErrorChannel <- err
+					} else if cfg.RecTypeRatio[RecTypeIndex].Name == "Internet" {
+						BrtDiamChannel <- data.DiamCH{TaskName: cfg.Name, Message: diam_message}
+						CDRPerSec.Inc(cfg.Name)
+					} else {
+						BrtDiamChannel <- data.DiamCH{TaskName: cfg.Name, Message: diam_message}
+						// Что бы не завалить на время тестов
+						time.Sleep(7 * time.Second)
+						//Для БРТ считаем здесь. Пока здесь, похоже фаил пишется дольше
+						CDRPerSec.Inc(cfg.Name)
 					}
 				}
 			}
@@ -582,14 +603,14 @@ func StartDiameterClient() {
 
 		brt_connect[i], err = Dial(cli, init_connect+":"+strconv.Itoa(global_cfg.Common.BRT_port), "", "", false, "tcp")
 		if err != nil {
-			log.Println("Connect error ")
-			log.Fatal(err)
+			log.Println("ERROR: Connect error ")
+			log.Println(err)
+		} else {
+			ProcessDebug("Connect to " + init_connect + " done.")
+			// Запуск потоков записи
+			go SendCCREvent(brt_connect[i], diam_cfg, BrtDiamChannel)
+			i++
 		}
-
-		ProcessDebug("Connect to " + init_connect + " done.")
-		// Запуск потоков записи
-		go SendCCREvent(brt_connect[i], diam_cfg, BrtDiamChannel)
-		i++
 	}
 
 	log.Println("DIAM: Done. Sending messages...")
@@ -609,9 +630,8 @@ func Dial(cli *sm.Client, addr, cert, key string, ssl bool, networkType string) 
 func AnswerCCAEvent() diam.HandlerFunc {
 	//func AnswerCCAEvent(done chan struct{}) diam.HandlerFunc {
 	return func(c diam.Conn, m *diam.Message) {
-		//обработчик ошибок
-		data.ResponseDiamHandler(m, log.Default(), debugm)
-		log.Println(m)
+		//обработчик ошибок, добавить поток(канал) для офлайна?
+		data.ResponseDiamHandler(m, &logdiam, debugm)
 	}
 }
 
@@ -634,8 +654,8 @@ func SendCCREvent(c diam.Conn, cfg *sm.Settings, in chan data.DiamCH) {
 	heartbeat := time.Tick(5 * time.Second)
 	meta, ok := smpeer.FromContext(c.Context())
 	if !ok {
-		log.Println("Client connection does not contain metadata")
-		log.Println("Close threads")
+		log.Println("DIAM: Client connection does not contain metadata")
+		log.Println("DIAM: Close threads")
 	}
 
 	for {
@@ -644,8 +664,8 @@ func SendCCREvent(c diam.Conn, cfg *sm.Settings, in chan data.DiamCH) {
 			// Сделать выход или переоткрытие?
 			meta, ok = smpeer.FromContext(c.Context())
 			if !ok {
-				log.Println("Client connection does not contain metadata")
-				log.Println("Close threads")
+				log.Println("DIAM: Client connection does not contain metadata")
+				log.Println("DIAM: Close threads")
 			}
 
 			// Настройка Watch Dog
@@ -669,7 +689,9 @@ func SendCCREvent(c diam.Conn, cfg *sm.Settings, in chan data.DiamCH) {
 			diam_message.NewAVP(avp.DestinationHost, avp.Mbit, 0, meta.OriginHost)
 
 			//log.Println("DIAM: Sending to ", c.RemoteAddr())
-			log.Printf("DIAM: Sending CCR to %s", c.RemoteAddr())
+			logdiam.Printf("DIAM: Sending CCR to %s", c.RemoteAddr())
+			//log.Printf("DIAM: Sending CCR to %s", c.RemoteAddr())
+			//log.Println(diam_message)
 
 			_, err = diam_message.WriteTo(c)
 			if err != nil {

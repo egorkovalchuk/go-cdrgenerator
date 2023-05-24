@@ -63,6 +63,8 @@ type RecTypeRatioType struct {
 	TypeService      string `json:"type_service"`
 	TypeCode         string `json:"type_code"`
 	ServiceContextId string `json:"service_context_id"`
+	MeasureType      string `json:"measure"`
+	RatingGroup      int    `json:"rating_group"`
 	RangeMin         int
 	RangeMax         int
 }

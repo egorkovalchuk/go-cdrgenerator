@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 	"math/rand"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -316,19 +317,19 @@ func CreateCCREventMessage(Msisdn RecTypePool, date time.Time, RecordType RecTyp
 	diam_message.NewAVP(avp.SubscriptionID, avp.Mbit, 0, &diam.GroupedAVP{
 		AVP: []*diam.AVP{
 			diam.NewAVP(avp.SubscriptionIDType, avp.Mbit, 0, datatype.Enumerated(0)),
-			//diam.NewAVP(avp.SubscriptionIDData, avp.Mbit, 0, datatype.UTF8String(Msisdn.Msisdn)), //"79251470282")),
-			diam.NewAVP(avp.SubscriptionIDData, avp.Mbit, 0, datatype.UTF8String("79251470282")),
+			diam.NewAVP(avp.SubscriptionIDData, avp.Mbit, 0, datatype.UTF8String(Msisdn.Msisdn)), //"79251470282")),
+			//diam.NewAVP(avp.SubscriptionIDData, avp.Mbit, 0, datatype.UTF8String("79251470282")),
 		},
 	})
 	diam_message.NewAVP(avp.SubscriptionID, avp.Mbit, 0, &diam.GroupedAVP{
 		AVP: []*diam.AVP{
 			diam.NewAVP(avp.SubscriptionIDType, avp.Mbit, 0, datatype.Enumerated(1)),
-			//diam.NewAVP(avp.SubscriptionIDData, avp.Mbit, 0, datatype.UTF8String(Msisdn.IMSI)), //"250020153589056")),
-			diam.NewAVP(avp.SubscriptionIDData, avp.Mbit, 0, datatype.UTF8String("250020153589056")),
+			diam.NewAVP(avp.SubscriptionIDData, avp.Mbit, 0, datatype.UTF8String(Msisdn.IMSI)), //"250020153589056")),
+			//diam.NewAVP(avp.SubscriptionIDData, avp.Mbit, 0, datatype.UTF8String("250020153589056")),
 		},
 	})
-	//diam_message.NewAVP(avp.UserName, avp.Mbit, 0, datatype.UTF8String(Msisdn.Msisdn)) //"79251470282"))
-	diam_message.NewAVP(avp.UserName, avp.Mbit, 0, datatype.UTF8String("79251470282"))
+	diam_message.NewAVP(avp.UserName, avp.Mbit, 0, datatype.UTF8String(Msisdn.Msisdn)) //"79251470282"))
+	//diam_message.NewAVP(avp.UserName, avp.Mbit, 0, datatype.UTF8String("79251470282"))
 
 	//{ Event-Timestamp }  Время события
 	diam_message.NewAVP(avp.EventTimestamp, avp.Mbit, 0, datatype.Time(time.Now()))
@@ -431,10 +432,12 @@ func CreateCCREventMessage(Msisdn RecTypePool, date time.Time, RecordType RecTyp
 	return diam_message, sid, nil
 }
 
-// Обработчик ответа
-func ResponseDiamHandler(message *diam.Message, log *log.Logger, debug bool) {
+// Обработчик ответа, возвращает код ответа и сессию
+func ResponseDiamHandler(message *diam.Message, log *log.Logger, debug bool) (int, string) {
 
-	op := ""
+	var err error
+	// универсальный формирование ответа
+	/*op := ""
 	cmd, err := message.Dictionary().FindCommand(
 		message.Header.ApplicationID,
 		message.Header.CommandCode,
@@ -443,40 +446,40 @@ func ResponseDiamHandler(message *diam.Message, log *log.Logger, debug bool) {
 		op += "unknown_command"
 	} else {
 		op += cmd.Short + "A"
-	}
+	}*/
 
 	// выделение кода ответа
 	mm, _ := message.FindAVPs(268, 0)
 	//var diamcode string
-	ans := "DIAM: Answer " + op + " code:"
+	//ans := "DIAM: Answer " + op + " code:"
 	resp_code := 0
 	s := 0
 	for _, i := range mm {
 		t := ConvertType(i)
-		ans += t + ";"
+		//ans += t + ";"
 		if s, err = strconv.Atoi(t); s > resp_code {
 			if err == nil {
 				resp_code = s
 			}
+
 		}
 	}
 
-	log.Println(ans)
+	// log.Println(ans)
 	// Текст ошибки
 	mm, _ = message.FindAVPs(avp.ErrorMessage, 0)
 	for _, i := range mm {
 		log.Println("ERROR: " + ConvertType(i))
 	}
 
-	if s == 4011 {
+	if message.Header.CommandCode == 272 {
 		m, _ := message.FindAVP(263, 0)
-		log.Println(ConvertType(m))
-		log.Println(m.Data.String())
-		log.Println(m.String())
-		log.Println(m.Serialize())
-	}
-	if s != 2001 {
-		log.Println(message)
+		if m.String() == "" {
+			log.Println("ERROR: " + ConvertType(m))
+		}
+		return s, ConvertType(m)
+	} else {
+		return s, ""
 	}
 }
 
@@ -487,9 +490,8 @@ func ConvertType(m *diam.AVP) string {
 		replacer := strings.NewReplacer("Unsigned32{", "", "}", "")
 		return replacer.Replace(m.Data.String())
 	case 15:
-		replacer := strings.NewReplacer("UTF8String{", "", "}", "")
-
-		return replacer.Replace(m.Data.String())
+		re := regexp.MustCompile(`UTF8String{(.*)},.*`)
+		return re.FindStringSubmatch(m.Data.String())[1]
 	default:
 		return m.Data.String()
 	}

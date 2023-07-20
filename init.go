@@ -23,7 +23,7 @@ func LogWrite(err error) {
 // Запись ошибок из горутин
 func LogWriteForGoRutine(err chan error) {
 	for err := range err {
-		datetime := time.Now().Local().Format("2006/02/01 03:04:05 ")
+		datetime := time.Now().Local().Format("2006/02/01 15:04:05 ")
 		log.SetPrefix(datetime + "ERROR: ")
 		log.SetFlags(0)
 		log.Println(err)
@@ -35,7 +35,7 @@ func LogWriteForGoRutine(err chan error) {
 // Запись ошибок из горутин для диаметра
 func DiamPrintErrors(ec <-chan *diam.ErrorReport) {
 	for err := range ec {
-		datetime := time.Now().Local().Format("2006/02/01 03:04:05 ")
+		datetime := time.Now().Local().Format("2006/02/01 15:04:05 ")
 		log.SetPrefix(datetime + "DIAM: ")
 		log.SetFlags(0)
 		log.Println(err)
@@ -49,7 +49,7 @@ func DiamPrintErrors(ec <-chan *diam.ErrorReport) {
 func ProcessDebug(logtext interface{}) {
 	if debugm {
 		// изменить интерыейс?
-		datetime := time.Now().Local().Format("2006/02/01 03:04:05 ")
+		datetime := time.Now().Local().Format("2006/02/01 15:04:05 ")
 		log.SetPrefix(datetime + "DEBUG: ")
 		log.SetFlags(0)
 		log.Println(logtext)

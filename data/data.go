@@ -3,6 +3,7 @@ package data
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"math/rand"
 	"os"
 	"strconv"
@@ -55,7 +56,7 @@ type TasksType struct {
 	CDR_pattern string `json:"cdr_pattern"`
 }
 
-//Тип структуры описания логического вызова, сервис кодов
+// Тип структуры описания логического вызова, сервис кодов
 type RecTypeRatioType struct {
 	Record_type      string `json:"record_type"`
 	Name             string `json:"name"`
@@ -69,7 +70,7 @@ type RecTypeRatioType struct {
 	RangeMax         int
 }
 
-//Структура строки пула
+// Структура строки пула
 type RecTypePool struct {
 	Msisdn     string
 	IMSI       string
@@ -77,6 +78,15 @@ type RecTypePool struct {
 }
 
 type PoolSubs []RecTypePool
+
+// Сткуртура для массива пост обработки
+type TypeBrtOfflineCdr struct {
+	RecPool     RecTypePool
+	CDRtime     time.Time
+	Ratio       RecTypeRatioType
+	TaskName    string
+	CDR_pattern string
+}
 
 func (cfg *Config) ReadConf(confname string) {
 	file, err := os.Open(confname)
@@ -96,7 +106,7 @@ func (cfg *Config) ReadConf(confname string) {
 
 }
 
-//Вызов справки
+// Вызов справки
 func HelpStart() {
 	fmt.Println("Use -d start deamon mode")
 	fmt.Println("Use -s stop deamon mode")
@@ -105,13 +115,13 @@ func HelpStart() {
 	fmt.Println("Use -brt message(cdr) transmission by diameter to the billing server ")
 }
 
-//Заполнение массива для последующей генерации нагрузки
+// Заполнение массива для последующей генерации нагрузки
 func (p PoolSubs) CreatePoolList(data [][]string, Task TasksType) PoolSubs {
 	var PoolList PoolSubs
 	for i, line := range data {
 		if i > 0 { // omit header line
 			var rec RecTypePool
-			rec.Msisdn = line[0]
+			rec.Msisdn = "7" + line[0]
 			rec.IMSI = line[1]
 			rec.CallsCount = Task.GenCallCount()
 			PoolList = append(PoolList, rec)
@@ -147,14 +157,14 @@ func RandomRecType(RecType []RecTypeRatioType, c int) int {
 	return 0
 }
 
-//Преобразование вещественного и строку
+// Преобразование вещественного и строку
 func FloatToString(input_num float64) string {
 	// to convert a float number to a string
 	return strconv.FormatFloat(input_num, 'f', 6, 64)
 }
 
-//Формирование записи для CDR
-//Формируется из шаблона с заменой
+// Формирование записи для CDR
+// Формируется из шаблона с заменой
 func CreateCDRRecord(RecordMsisdn RecTypePool, date time.Time, RecordType RecTypeRatioType, cfg string) (string, error) {
 	// Номер записи, добавить генерацию
 	rec_number := time.Now().Format("0201030405")
@@ -167,7 +177,7 @@ func CreateCDRRecord(RecordMsisdn RecTypePool, date time.Time, RecordType RecTyp
 	CDR_pattern = strings.Replace(CDR_pattern, "{imsi}", RecordMsisdn.IMSI, 1)
 	CDR_pattern = strings.Replace(CDR_pattern, "{msisdn}", RecordMsisdn.Msisdn, 1)
 	CDR_pattern = strings.Replace(CDR_pattern, "{rec_number}", rec_number, 1)
-	CDR_pattern = strings.Replace(CDR_pattern, "{datetime}", date.Format("20060201030405"), 1)
+	CDR_pattern = strings.Replace(CDR_pattern, "{datetime}", date.Format("20060102030405"), 1)
 
 	return CDR_pattern, nil
 }
@@ -186,7 +196,7 @@ func NewCounters() *Counters {
 	}
 }
 
-// Записать значение
+// Получить значение
 func (c *Counters) Load(key string) int {
 	c.mx.Lock()
 	val, _ := c.m[key]
@@ -194,7 +204,7 @@ func (c *Counters) Load(key string) int {
 	return val
 }
 
-//Загрузить значение
+// Загрузить значение
 func (c *Counters) Store(key string, value int) {
 	c.mx.Lock()
 	c.m[key] = value
@@ -215,6 +225,14 @@ func (c *Counters) IncN(key string, inc int) {
 	c.mx.Unlock()
 }
 
+func (c *Counters) LoadRangeToLog(s string, log *log.Logger) {
+	c.mx.Lock()
+	for k, v := range c.m {
+		log.Println(s + k + ": " + strconv.Itoa(v))
+	}
+	c.mx.Unlock()
+}
+
 // map c mutex
 // для контроля потока записи. Мутекс для избегания блокировок
 type FlagType struct {
@@ -229,7 +247,7 @@ func NewFlag() *FlagType {
 	}
 }
 
-// Записать значение
+// Получить значение
 func (c *FlagType) Load(key string) int {
 	c.mx.Lock()
 	val, _ := c.m[key]
@@ -237,7 +255,7 @@ func (c *FlagType) Load(key string) int {
 	return val
 }
 
-//Загрузить значение
+// Загрузить значение
 func (c *FlagType) Store(key string, value int) {
 	c.mx.Lock()
 	c.m[key] = value
@@ -268,7 +286,7 @@ func (c *RecTypeCounters) AddMap(key1 string, key2 string, val int) map[string]m
 	return c.m
 }
 
-// Записать значение
+// Получить значение
 func (c *RecTypeCounters) Load(key1 string, key2 string) int {
 	c.mx.Lock()
 	val, _ := c.m[key1][key2]
@@ -276,7 +294,7 @@ func (c *RecTypeCounters) Load(key1 string, key2 string) int {
 	return val
 }
 
-//Загрузить значение
+// Загрузить значение
 func (c *RecTypeCounters) Store(key1 string, key2 string, value int) {
 	c.mx.Lock()
 	c.m[key1][key2] = value
@@ -324,4 +342,39 @@ func (i *ArgListType) Get(value string) bool {
 		}
 	}
 	return false
+}
+
+// Массив для работы с кешем запросов
+type BrtOfflineCdr struct {
+	mx         sync.RWMutex
+	CDROffline map[string](TypeBrtOfflineCdr)
+}
+
+// Конструктор для типа данных BrtOfflineCdr для кеша
+func NewCDROffline() *BrtOfflineCdr {
+	return &BrtOfflineCdr{
+		CDROffline: make(map[string](TypeBrtOfflineCdr)),
+	}
+}
+
+// Получить значение
+func (c *BrtOfflineCdr) Load(key string) TypeBrtOfflineCdr {
+	c.mx.RLock()
+	val, _ := c.CDROffline[key]
+	c.mx.RUnlock()
+	return val
+}
+
+// Загрузить значение
+func (c *BrtOfflineCdr) Store(key string, value TypeBrtOfflineCdr) {
+	c.mx.Lock()
+	c.CDROffline[key] = value
+	c.mx.Unlock()
+}
+
+// Удалить значение
+func (c *BrtOfflineCdr) Delete(key string) {
+	c.mx.Lock()
+	delete(c.CDROffline, key)
+	c.mx.Unlock()
 }

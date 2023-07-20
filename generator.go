@@ -11,7 +11,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/egorkovalchuk/go-cdrgenerator/data"
@@ -28,7 +27,7 @@ import (
 const (
 	logFileName = "generator.log"
 	pidFileName = "generator.pid"
-	versionutil = "0.2.1"
+	versionutil = "0.3.1"
 )
 
 var (
@@ -47,7 +46,7 @@ var (
 	// запрос версии
 	version bool
 
-	//Запись в фаил
+	// Запись в фаил
 	tofile     bool
 	tofilelist data.ArgListType
 
@@ -56,32 +55,30 @@ var (
 	camel   bool
 	brtlist data.ArgListType
 
-	//Каналы для управления и передачи информации
-	CDRChannel     = make(chan string)
+	// Каналы для управления и передачи информации
 	ProcessChannel = make(chan string)
 	ErrorChannel   = make(chan error)
-	//Признак запуска дополнительного потока
+
+	// Признак запуска дополнительного потока
 	Flag = data.NewFlag()
-	//Скорость потока
+	// Скорость потока
 	CDRPerSec = data.NewCounters()
-	//Срез для каналов
+	// Срез для каналов
 	CDRChanneltoFileUni = make(map[string](chan string))
 	CDRChanneltoBRTUni  = make(map[string](chan string))
-	//Статистика записи
-	CDRRecCount     = data.NewCounters()
-	CDRFileCount    = data.NewCounters()
-	CDRRecTypeCount = data.NewRecTypeCounters()
-	CDRBRTCount     = data.NewCounters()
+	// Статистика записи
+	CDRRecCount         = data.NewCounters()
+	CDRFileCount        = data.NewCounters()
+	CDRRecTypeCount     = data.NewRecTypeCounters()
+	CDRBRTCount         = data.NewCounters()
+	CDRBRTResponseCount = data.NewCounters()
 
-	//Канал для Диметра коннект к БРТ
+	// Канал для Диметра коннект к БРТ
 	BrtDiamChannelAnswer = make(chan struct{}, 1000)
 	BrtDiamChannel       = make(chan data.DiamCH, 1000)
+	BrtOfflineCDR        = data.NewCDROffline()
 
-	//Не используется(в коде закоменчено)
-	CDRChanneltoFile     = make(chan string)
-	CDRRoamChanneltoFile = make(chan string)
-
-	m       sync.Mutex
+	// Запись логов по диаметру
 	logdiam log.Logger
 
 /*
@@ -91,7 +88,7 @@ CCR/CCA type request "Event"
 Vesion 0.2.1
 Fix Bug
 Vesion 0.3.0
-
+Add emulation of the switch operation with a 4011 response (no need for control)
 */
 
 )
@@ -101,7 +98,6 @@ func main() {
 	//start program
 	var argument string
 	/*var progName string
-
 	progName = os.Args[0]*/
 
 	if os.Args != nil && len(os.Args) > 1 {
@@ -241,7 +237,7 @@ func StartSimpleMode() {
 						log.Println("INFO: Start diameter thread for " + thread.Name)
 						go StartTaskDiam(PoolList, thread, true)
 						// Запускаем запись для офлайна - ответ брт 4011
-						// go StartTaskFile(PoolList, thread, true)
+						go StartFileCDR(thread, CDRChanneltoFileUni[thread.Name])
 					} else if tofile {
 						// Если пишем в фаил, в начале запускаем потоки записи в фаил или коннекта к BRT
 						// Запускать потоки записи по количеству путей? Не будет ли пересечение по именам файлов
@@ -268,13 +264,21 @@ func StartSimpleMode() {
 		if tofile {
 			log.Println("INFO: Save " + strconv.Itoa(CDRFileCount.Load(thread.Name)) + " files for " + thread.Name)
 		}
+		if brt {
+			log.Println("INFO: Save offline " + strconv.Itoa(CDRRecCount.Load(thread.Name+"offline")) + " CDR for " + thread.Name)
+		}
 	}
 	if brt {
 		for _, ip := range global_cfg.Common.BRT {
 			log.Println("INFO: Send " + strconv.Itoa(CDRBRTCount.Load(ip)) + " messages to " + ip)
 		}
 	}
+	CDRBRTResponseCount.LoadRangeToLog("INFO: BRT response code ", log.Default())
 	log.Println("INFO: End schelduler")
+
+	//Удалить
+	//log.Println(BrtOfflineCDR)\
+	log.Println(len(BrtOfflineCDR.CDROffline))
 
 }
 
@@ -312,6 +316,11 @@ func Monitor() {
 					log.Println("INFO: Load " + thread.Name + " calls type " + t.Record_type + " type service " + t.TypeService + "(" + t.Name + ") " + CDRRecTypeCount.LoadString(thread.Name, t.Name))
 				}
 			}
+			if brt {
+				for _, ip := range global_cfg.Common.BRT {
+					log.Println("INFO: Send " + strconv.Itoa(CDRBRTCount.Load(ip)) + " messages to " + ip)
+				}
+			}
 		}
 	}
 }
@@ -330,8 +339,7 @@ func StartTaskFile(PoolList []data.RecTypePool, cfg data.TasksType, FirstStart b
 	for {
 		// Порождать доп процессы может только первый процесс
 		// Уменьшает обращение с блокировками переменной флаг
-		// при БРТ не стартует поток ВРЕМЕННО!!!
-		if FirstStart && !brt {
+		if FirstStart {
 			if Flag.Load(cfg.Name) == 1 {
 				log.Println("INFO: Start new thead " + cfg.Name)
 				go StartTaskFile(PoolList, cfg, false)
@@ -419,7 +427,12 @@ func StartFileCDR(task data.TasksType, InputString chan string) {
 
 			str := <-InputString
 			//Перенес из генерации, в одном потоке будет работать быстрее
-			CDRPerSec.Inc(task.Name)
+			//Исключаем запись из брт
+			if brtlist.Get(task.Name) {
+				CDRRecCount.Inc(task.Name + "offline")
+			} else {
+				CDRPerSec.Inc(task.Name)
+			}
 
 			_, err = f.WriteString(str + "\n")
 
@@ -477,19 +490,26 @@ func StartTaskDiam(PoolList []data.RecTypePool, cfg data.TasksType, FirstStart b
 					RecTypeIndex = data.RandomRecType(cfg.RecTypeRatio, rand.Intn(100))
 					CDRRecTypeCount.Inc(cfg.Name, cfg.RecTypeRatio[RecTypeIndex].Name)
 
-					diam_message, _, err := data.CreateCCREventMessage(PoolList[PoolIndex], time.Now(), cfg.RecTypeRatio[RecTypeIndex], dict.Default)
-					//если ответ 4011 формируется CDR
-					//помещем в массив.
+					diam_message, sid, err := data.CreateCCREventMessage(PoolList[PoolIndex], time.Now(), cfg.RecTypeRatio[RecTypeIndex], dict.Default)
+					// Все сообщения добавляются в массив
+					// после получения кода 4011 формируется оффлайн CDR
+					if err == nil {
+						BrtOfflineCDR.Store(sid, data.TypeBrtOfflineCdr{RecPool: PoolList[PoolIndex],
+							CDRtime:     time.Now(),
+							Ratio:       cfg.RecTypeRatio[RecTypeIndex],
+							TaskName:    cfg.Name,
+							CDR_pattern: cfg.CDR_pattern})
+					}
 					if err != nil {
 						CDRPerSec.Inc(cfg.Name)
-						ErrorChannel <- err
+						//ErrorChannel <- err
 					} else if cfg.RecTypeRatio[RecTypeIndex].Name == "Internet" {
 						BrtDiamChannel <- data.DiamCH{TaskName: cfg.Name, Message: diam_message}
 						CDRPerSec.Inc(cfg.Name)
 					} else {
 						BrtDiamChannel <- data.DiamCH{TaskName: cfg.Name, Message: diam_message}
 						// Что бы не завалить на время тестов
-						time.Sleep(7 * time.Second)
+						//time.Sleep(1 * time.Second)
 						//Для БРТ считаем здесь. Пока здесь, похоже фаил пишется дольше
 						CDRPerSec.Inc(cfg.Name)
 					}
@@ -631,14 +651,35 @@ func AnswerCCAEvent() diam.HandlerFunc {
 	//func AnswerCCAEvent(done chan struct{}) diam.HandlerFunc {
 	return func(c diam.Conn, m *diam.Message) {
 		//обработчик ошибок, добавить поток(канал) для офлайна?
-		data.ResponseDiamHandler(m, &logdiam, debugm)
+		// Конкуренция по ответам, запись в фаил?
+		s, sid := data.ResponseDiamHandler(m, &logdiam, debugm)
+		CDRBRTResponseCount.Inc(strconv.Itoa(s))
+		if s == 4011 || s == 4522 || s == 4012 {
+			//logdiam.Println("DIAM: Answer CCA code: " + strconv.Itoa(s) + " Session: " + sid)
+			//переход в оффлайн
+			val := BrtOfflineCDR.Load(sid) //BrtOfflineCDR[sid]*
+			rr, err := data.CreateCDRRecord(val.RecPool, val.CDRtime, val.Ratio, val.CDR_pattern)
+			CDRChanneltoFileUni[val.TaskName] <- rr
+			if err != nil {
+				ErrorChannel <- err
+			}
+			BrtOfflineCDR.Delete(sid)
+		} else if s == 5030 {
+			// 5030 пользователь не известен
+			BrtOfflineCDR.Delete(sid)
+		} else {
+			//logdiam.Println("DIAM: Answer CCA code: " + strconv.Itoa(s))
+			BrtOfflineCDR.Delete(sid)
+		}
+
 	}
 }
 
 func AnswerDWAEvent() diam.HandlerFunc {
 	return func(c diam.Conn, m *diam.Message) {
-		//обработчик ошибок
-		data.ResponseDiamHandler(m, log.Default(), debugm)
+		//обработчик ошибок, вотч дог пишем в обычный лог
+		s, _ := data.ResponseDiamHandler(m, log.Default(), debugm)
+		log.Println("DIAM: Answer DWA code: " + strconv.Itoa(s))
 	}
 }
 
@@ -688,16 +729,13 @@ func SendCCREvent(c diam.Conn, cfg *sm.Settings, in chan data.DiamCH) {
 			diam_message.NewAVP(avp.DestinationRealm, avp.Mbit, 0, meta.OriginRealm)
 			diam_message.NewAVP(avp.DestinationHost, avp.Mbit, 0, meta.OriginHost)
 
-			//log.Println("DIAM: Sending to ", c.RemoteAddr())
-			logdiam.Printf("DIAM: Sending CCR to %s", c.RemoteAddr())
-			//log.Printf("DIAM: Sending CCR to %s", c.RemoteAddr())
-			//log.Println(diam_message)
+			/*logdiam.Printf("DIAM: Sending CCR to %s", c.RemoteAddr())
+			logdiam.Println(diam_message)*/
 
 			_, err = diam_message.WriteTo(c)
 			if err != nil {
 				ErrorChannel <- err
 			} else {
-				//CDRPerSec.Inc(tmp.TaskName)
 				CDRBRTCount.Inc(server)
 			}
 
@@ -711,6 +749,6 @@ func SendCCREvent(c diam.Conn, cfg *sm.Settings, in chan data.DiamCH) {
 // Поток телнета Кемел
 // два типа каналов CDR и закрытие/переоткрытие
 // +надо сделать keepalive
-func StartCamelTelnet() {
+func StartCamelServer() {
 
 }

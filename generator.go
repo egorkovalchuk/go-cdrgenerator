@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"flag"
 	"fmt"
+	"io"
 
 	"log"
 	"math/rand"
@@ -13,13 +14,17 @@ import (
 	"strings"
 	"time"
 
+	"context"
+
 	"github.com/egorkovalchuk/go-cdrgenerator/data"
+	"github.com/egorkovalchuk/go-cdrgenerator/tlv"
 	"github.com/fiorix/go-diameter/v4/diam"
 	"github.com/fiorix/go-diameter/v4/diam/avp"
 	"github.com/fiorix/go-diameter/v4/diam/datatype"
 	"github.com/fiorix/go-diameter/v4/diam/dict"
 	"github.com/fiorix/go-diameter/v4/diam/sm"
 	"github.com/fiorix/go-diameter/v4/diam/sm/smpeer"
+	//"github.com/pkg/profile"
 )
 
 //Power by  Egor Kovalchuk
@@ -27,11 +32,11 @@ import (
 const (
 	logFileName = "generator.log"
 	pidFileName = "generator.pid"
-	versionutil = "0.3.1"
+	versionutil = "0.4.4"
 )
 
 var (
-	//конфиг
+	// конфиг
 	global_cfg data.Config
 
 	// режим работы сервиса(дебаг мод)
@@ -47,8 +52,7 @@ var (
 	version bool
 
 	// Запись в фаил
-	tofile     bool
-	tofilelist data.ArgListType
+	tofile bool
 
 	// для выбора типа соединения
 	brt     bool
@@ -57,43 +61,67 @@ var (
 
 	// Каналы для управления и передачи информации
 	ProcessChannel = make(chan string)
-	ErrorChannel   = make(chan error)
+	LogChannel     = make(chan LogStruct)
+
+	// Задержка при отсылки информации для tcp
+	time_sleep int
 
 	// Признак запуска дополнительного потока
 	Flag = data.NewFlag()
 	// Скорость потока
 	CDRPerSec = data.NewCounters()
-	// Срез для каналов
+	// Скорость потока Camel
+	CDRPerSecCamel = data.NewCounters()
+	// Скорость потока Diameter
+	CDRPerSecDiam = data.NewCounters()
+	// Срез для каналов для записи файлов
 	CDRChanneltoFileUni = make(map[string](chan string))
-	CDRChanneltoBRTUni  = make(map[string](chan string))
+	// Срез CDR_Pattern, для уменьшения использовании памяти вынесена из массива
+	CDRPatternTask = make(map[string]data.CDRPatternType)
+
 	// Статистика записи
-	CDRRecCount         = data.NewCounters()
-	CDRFileCount        = data.NewCounters()
-	CDRRecTypeCount     = data.NewRecTypeCounters()
-	CDRBRTCount         = data.NewCounters()
-	CDRBRTResponseCount = data.NewCounters()
+	CDRRecCount           = data.NewCounters()
+	CDRFileCount          = data.NewCounters()
+	CDRRecTypeCount       = data.NewRecTypeCounters()
+	CDRDiamCount          = data.NewCounters()
+	CDRDiamRCount         = data.NewCounters()
+	CDRDiamResponseCount  = data.NewCounters()
+	CDRCamelCount         = data.NewCounters()
+	CDRCamelRCount        = data.NewCounters()
+	CDRCamelResponseCount = data.NewCounters()
 
-	// Канал для Диметра коннект к БРТ
-	BrtDiamChannelAnswer = make(chan struct{}, 1000)
-	BrtDiamChannel       = make(chan data.DiamCH, 1000)
+	// Канал для Диметра коннект к БРТ и Camel
+	BrtDiamChannelAnswer = make(chan diam.Message, 2000)
+	BrtDiamChannel       = make(chan data.DiamCH, 2000)
 	BrtOfflineCDR        = data.NewCDROffline()
+	CamelOfflineCDR      = data.NewCDROffline()
 
-	// Запись логов по диаметру
-	logdiam log.Logger
+	// Канал записи в Camel
+	CamelChannel = make(chan tlv.Camel_tcp, 2000)
 
-/*
-Vesion 0.2
-add Diameter connection to Nexign NWM produtcs (3GPP Diameter Credit-Control Application)
-CCR/CCA type request "Event"
-Vesion 0.2.1
-Fix Bug
-Vesion 0.3.0
-Add emulation of the switch operation with a 4011 response (no need for control)
-*/
+	// Канал записи статистики в БД
+	ReportStat = make(chan string, 1000)
 
+	// Маркер завершения горутин генерации нагрузки
+	st = false
+	// Тестовый параметр замедления
+	slow  bool // Равномерная запись
+	slow1 bool // Запись раз в 10 секунд - можно удали что бы не съедать машинное время
+
+	// Удаление файлов после работы демона
+	// Тестовая опция для удобства
+	rm bool
+	// Разрешить запускать дочернии процессы
+	thread bool
+
+	//тетс
+	ctx    context.Context
+	cancel context.CancelFunc
 )
 
 func main() {
+
+	//defer profile.Start(profile.MemProfile, profile.ProfilePath("C:/Temp")).Stop()
 
 	//start program
 	var argument string
@@ -113,21 +141,26 @@ func main() {
 	}
 
 	flag.BoolVar(&debugm, "debug", false, "Start with debug mode")
-	flag.BoolVar(&startdaemon, "d", false, "a bool")
+	flag.BoolVar(&startdaemon, "d", false, "Start SCP server")
 	flag.BoolVar(&version, "v", false, "Print version")
 	flag.BoolVar(&brt, "brt", false, "Connect to BRT Diameter protocol")
 	flag.BoolVar(&tofile, "file", false, "Start save CDR to file")
-	flag.BoolVar(&camel, "camel", false, "Connect to BRT Camel protocol")
+	flag.BoolVar(&camel, "camel", false, "SCP(Camel) Server for BRT (Camel protocol)")
 	flag.Var(&brtlist, "brtlist", "List of name task to work BRT")
-	//flag.Var(&tofilelist, "filelist", "Connect to BRT Diameter protocol")
+	flag.BoolVar(&rm, "rm", false, "Delete files")
+	flag.BoolVar(&thread, "thread", false, "Enable start new threads")
 	// for Linux compile
 	// Для использования передачи системных сигналов
 	stdaemon := flag.Bool("s", false, "a bool") // для передачи
 	// --for Linux compile
+	// замедление и тесты
+	flag.BoolVar(&slow, "slow", false, "Start with slow mode")
+	flag.BoolVar(&slow1, "slow1", false, "Start with slow1 mode")
 	flag.Parse()
 
 	// Открытие лог файла
 	// ротация не поддерживается в текущей версии
+	// Вынести в горутину
 	filer, err := os.OpenFile(logFileName, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0666)
 	if err != nil {
 		log.Fatal(err)
@@ -135,16 +168,16 @@ func main() {
 	defer filer.Close()
 
 	log.SetOutput(filer)
-	log.Println("- - - - - - - - - - - - - - -")
-	log.Println("INFO: Start util")
 
+	// запуск горутины записи в лог
+	go LogWriteForGoRutineStruct(LogChannel)
+
+	ProcessInfo("Start util")
 	ProcessDebug("Start with debug mode")
 
 	if startdaemon {
-
-		log.Println("Start daemon mode")
-		ProcessDebug("Start with debug mode")
-		fmt.Println("Start daemon mode")
+		LogChannel <- LogStruct{"INFO", "Start daemon mode"}
+		fmt.Println("Start util in daemon mode")
 	}
 
 	if version {
@@ -152,32 +185,30 @@ func main() {
 		return
 	}
 
-	//Чтение конфига
+	// Чтение конфига
 	global_cfg.ReadConf("config.json")
 
+	// инициализация переменных
 	InitVariables()
 
-	//Диметр в отдельный фаил
-	if brt {
-		filer1, err := os.OpenFile("diam.log", os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0666)
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer filer1.Close()
-		logdiam.SetOutput(filer1)
-		logdiam.SetPrefix("")
-		logdiam.SetFlags(log.Ldate | log.Ltime)
-	}
+	// запуск контекста
+	ctx, cancel = context.WithCancel(context.Background())
 
-	// запуск горутины записи в лог
-	go LogWriteForGoRutine(ErrorChannel)
 	// Запуск мониторинга
+	// вркменно отключено для демона
+	// сделать задержку запуска мониторинга. запускается ранбше чем статистика начинает писаться.
 	go Monitor()
+	// Запуск статистики
+	// как переопределить монитор?
+	if global_cfg.Common.Report.Influx == true {
+		go data.StartWriteInflux(global_cfg.Common, ProcessInflux, ReportStat)
+	}
 
 	// Определяем ветку
 	// Запускать горутиной с ожиданием процесса сигналов от ОС
 	if startdaemon || *stdaemon {
-		log.Println("daemon terminated")
+		StartDaemonMode()
+		ProcessInfo("Daemon terminated")
 	} else {
 		StartSimpleMode()
 	}
@@ -193,26 +224,20 @@ func StartSimpleMode() {
 	// при завершении времени останавливают дочерние и сами
 	// Добавить сигнал остановки
 
-	// Вынесено из теста. Нужна ли отдельная точка входа для роуминга?
-	if brt && len(brtlist) != 0 {
-		// Запуск потока БРТ
-		// Горутина запускается из функции, по количеству серверов
-		// Поток идет только по правилу один хост один пир
-		StartDiameterClient()
-	}
+	// Запуски Диаметр и Кемел
+	StartClient()
 
-	//Основной цикл
+	// Основной цикл
 	for _, thread := range global_cfg.Tasks {
 		if thread.DatapoolCsvFile == "" {
-			log.Println("WARM: Please, set the file name specified for " + thread.Name)
+			ProcessWarm("Please, set the file name specified for " + thread.Name)
 		} else {
 			f, err := os.Open(thread.DatapoolCsvFile)
 			if err != nil {
-				log.Println("ERROR: Unable to read input file "+thread.DatapoolCsvFile, err)
-				log.Println("ERROR: Thread " + thread.Name + " not start")
+				ProcessErrorAny("Unable to read input file "+thread.DatapoolCsvFile, err)
+				ProcessError("Thread " + thread.Name + " not start")
 			} else {
 				defer f.Close()
-				//Вынести в глобальные?
 				ProcessDebug("Start load" + thread.DatapoolCsvFile)
 
 				// read csv values using csv.Reader
@@ -221,31 +246,36 @@ func StartSimpleMode() {
 				csvReader.Comma = ';'
 				csv, err := csvReader.ReadAll()
 
-				//Заполнение количества звонков на абонента
+				// Заполнение количества звонков на абонента
 				var PoolList data.PoolSubs
 				PoolList = PoolList.CreatePoolList(csv, thread)
 
 				if err != nil {
-					log.Println(err)
+					ProcessError(err)
 				} else {
 					ProcessDebug("Last record ")
 					ProcessDebug(PoolList[len(PoolList)-1])
 
-					log.Println("INFO: Load " + strconv.Itoa(len(PoolList)) + " records")
+					ProcessInfo("Load " + strconv.Itoa(len(PoolList)) + " records")
 
-					if brt && brtlist.Get(thread.Name) {
-						log.Println("INFO: Start diameter thread for " + thread.Name)
+					if camel {
+						go StartTaskCamel(PoolList, thread, true)
+						// Запускаем запись для офлайна - ответ брт != 0 или параметр из конфига
+						go StartFileCDR(thread, CDRChanneltoFileUni[thread.Name])
+					} else if brt && brtlist.Get(thread.Name) {
+						ProcessInfo("Start diameter thread for " + thread.Name)
+						// Запуск задачи формирования вызовов и отправки в БРТ по диаметру
 						go StartTaskDiam(PoolList, thread, true)
 						// Запускаем запись для офлайна - ответ брт 4011
 						go StartFileCDR(thread, CDRChanneltoFileUni[thread.Name])
 					} else if tofile {
 						// Если пишем в фаил, в начале запускаем потоки записи в фаил или коннекта к BRT
 						// Запускать потоки записи по количеству путей? Не будет ли пересечение по именам файлов
-						log.Println("INFO: Start file thread for " + thread.Name)
+						ProcessInfo("Start file thread for " + thread.Name)
 						go StartFileCDR(thread, CDRChanneltoFileUni[thread.Name])
 						go StartTaskFile(PoolList, thread, true)
 					} else {
-						log.Println("INFO: Usage options not set " + thread.Name)
+						ProcessInfo("Usage options not set " + thread.Name)
 					}
 
 				}
@@ -253,72 +283,94 @@ func StartSimpleMode() {
 			}
 		}
 	}
-
-	log.Println("INFO: Start schelduler")
-	// Ждем выполнение таймаута
-	// Добавить в дальнейшем выход по событию от системы
-	time.Sleep(time.Duration(global_cfg.Common.Duration) * time.Second)
-
-	for _, thread := range global_cfg.Tasks {
-		log.Println("INFO: All load " + strconv.Itoa(CDRRecCount.Load(thread.Name)) + " records for " + thread.Name)
-		if tofile {
-			log.Println("INFO: Save " + strconv.Itoa(CDRFileCount.Load(thread.Name)) + " files for " + thread.Name)
-		}
-		if brt {
-			log.Println("INFO: Save offline " + strconv.Itoa(CDRRecCount.Load(thread.Name+"offline")) + " CDR for " + thread.Name)
-		}
-	}
-	if brt {
-		for _, ip := range global_cfg.Common.BRT {
-			log.Println("INFO: Send " + strconv.Itoa(CDRBRTCount.Load(ip)) + " messages to " + ip)
-		}
-	}
-	CDRBRTResponseCount.LoadRangeToLog("INFO: BRT response code ", log.Default())
-	log.Println("INFO: End schelduler")
-
-	//Удалить
-	//log.Println(BrtOfflineCDR)\
-	log.Println(len(BrtOfflineCDR.CDROffline))
-
+	end()
 }
 
 // Функция контроля рейтов
-// Считать ли по рек тайпам?
+// Подсчетов типов отправленных сообщений
 func Monitor() {
 	heartbeat := time.Tick(1 * time.Second)
 	heartbeat10 := time.Tick(10 * time.Second)
 
 	var CDR int
+	var CDRCamel int
+	var CDRDiam int
+	var checkstart int
+
+	tmpCamel := make(map[string]int)
+	tmpDiam := make(map[string]int)
 
 	time.Sleep(5 * time.Second)
 
 	for {
 		select {
+		case <-ctx.Done():
+			ProcessInfo("Stop monitor")
+			return
 		case <-heartbeat:
 			for _, thread := range global_cfg.Tasks {
 				CDR = CDRPerSec.Load(thread.Name)
 				ProcessDebug("Speed task " + thread.Name + " " + strconv.Itoa(CDR) + " op/s")
+				if camel {
+					CDRCamel = CDRPerSecCamel.Load(thread.Name)
+					ProcessDebug("Speed camel task " + thread.Name + " " + strconv.Itoa(CDRCamel) + " op/s")
+				}
+				if brt && brtlist.Get(thread.Name) {
+					CDRDiam = CDRPerSecDiam.Load(thread.Name)
+					ProcessDebug("Speed Diameter task " + thread.Name + " " + strconv.Itoa(CDRDiam) + " op/s")
+				}
+				// вынести отдельно? что бы уменьшить выполнения условий
+				if global_cfg.Common.Report.Influx {
+					ReportStat <- "cdr_offline,region=" + global_cfg.Common.Report.Region + ",task_name=" + thread.Name + " speed=" + strconv.Itoa(CDR)
+					if camel {
+						ReportStat <- "cdr_camel,region=" + global_cfg.Common.Report.Region + ",task_name=" + thread.Name + " speed=" + strconv.Itoa(CDRCamel)
+					}
+					if brt && brtlist.Get(thread.Name) {
+						ReportStat <- "cdr_brt,region=" + global_cfg.Common.Report.Region + ",task_name=" + thread.Name + " speed=" + strconv.Itoa(CDRDiam)
+					}
+				}
 
 				if CDR < thread.CallsPerSecond {
-					Flag.Store(thread.Name, 1)
+					// запускаем еще один поток если только 10 секунд подряд скорость была ниже
+					if checkstart > 10 {
+						Flag.Store(thread.Name, 1)
+						checkstart = 0
+					}
+					checkstart++
+				} else {
+					checkstart = 0
 				}
 				CDRRecCount.IncN(thread.Name, CDR)
 				CDRPerSec.Store(thread.Name, 0)
+				CDRPerSecCamel.Store(thread.Name, 0)
+				CDRPerSecDiam.Store(thread.Name, 0)
 			}
 		case <-heartbeat10:
-			log.Println("INFO: 10 second generator statistics")
+			ProcessInfo("10 second generator statistics")
 			for _, thread := range global_cfg.Tasks {
-				log.Println("INFO: Load " + strconv.Itoa(CDRRecCount.Load(thread.Name)) + " records for " + thread.Name)
+				ProcessInfo("Load " + strconv.Itoa(CDRRecCount.Load(thread.Name)) + " records for " + thread.Name)
 				if tofile {
-					log.Println("INFO: Save " + strconv.Itoa(CDRFileCount.Load(thread.Name)) + " files for " + thread.Name)
+					ProcessInfo("Save " + strconv.Itoa(CDRFileCount.Load(thread.Name)) + " files for " + thread.Name)
 				}
 				for _, t := range thread.RecTypeRatio {
-					log.Println("INFO: Load " + thread.Name + " calls type " + t.Record_type + " type service " + t.TypeService + "(" + t.Name + ") " + CDRRecTypeCount.LoadString(thread.Name, t.Name))
+					ProcessInfo("Load " + thread.Name + " calls type " + t.Record_type + " type service " + t.TypeService + "(" + t.Name + ") " + CDRRecTypeCount.LoadString(thread.Name, t.Name))
 				}
 			}
 			if brt {
 				for _, ip := range global_cfg.Common.BRT {
-					log.Println("INFO: Send " + strconv.Itoa(CDRBRTCount.Load(ip)) + " messages to " + ip)
+					ProcessInfo("Send " + strconv.Itoa(CDRDiamCount.Load(ip)) + " Diameter messages to " + ip)
+				}
+				CDRDiamResponseCount.LoadRangeToLogFunc("Diameter response code ", ProcessInfo)
+				if global_cfg.Common.Report.Influx {
+					tmpDiam = CDRDiamResponseCount.LoadMapSpeed(tmpDiam, "brt", global_cfg.Common.Report.Region, ReportStat, ProcessInflux)
+				}
+			}
+			if camel {
+				CDRCamelCount.LoadRangeToLogFunc("Camel messages id  ", ProcessInfo)
+				CDRCamelResponseCount.LoadRangeToLogFunc("Camel response code Brt id ", ProcessInfo)
+				CDRCamelRCount.LoadRangeToLogFunc("Camel messages revc ", ProcessInfo)
+				if global_cfg.Common.Report.Influx {
+					tmpCamel = CDRCamelResponseCount.LoadMapSpeed(tmpCamel, "camel", global_cfg.Common.Report.Region, ReportStat, ProcessInflux)
 				}
 			}
 		}
@@ -333,15 +385,16 @@ func StartTaskFile(PoolList []data.RecTypePool, cfg data.TasksType, FirstStart b
 	var CDR int
 	var RecTypeIndex int
 	var tmp int
+	var skeep int
 	PoolIndex = 0
 	PoolIndexMax = len(PoolList) - 1
 
 	for {
 		// Порождать доп процессы может только первый процесс
 		// Уменьшает обращение с блокировками переменной флаг
-		if FirstStart {
+		if FirstStart && thread {
 			if Flag.Load(cfg.Name) == 1 {
-				log.Println("INFO: Start new thead " + cfg.Name)
+				ProcessInfo("Start new thead " + cfg.Name)
 				go StartTaskFile(PoolList, cfg, false)
 				Flag.Store(cfg.Name, 0)
 			}
@@ -352,12 +405,11 @@ func StartTaskFile(PoolList []data.RecTypePool, cfg data.TasksType, FirstStart b
 			// Сброс счетчика
 			if PoolIndex >= PoolIndexMax {
 				PoolIndex = 0
+				skeep = 1
 			}
 
 			PoolIndex++
-
 			tmp = PoolList[PoolIndex].CallsCount
-
 			if tmp != 0 {
 
 				PoolList[PoolIndex].CallsCount = tmp - 1
@@ -365,18 +417,19 @@ func StartTaskFile(PoolList []data.RecTypePool, cfg data.TasksType, FirstStart b
 				RecTypeIndex = data.RandomRecType(cfg.RecTypeRatio, rand.Intn(100))
 				CDRRecTypeCount.Inc(cfg.Name, cfg.RecTypeRatio[RecTypeIndex].Name)
 
-				//Запись в фаил
+				// Запись в фаил
 				// Формирование готовой строки для записи в фаил
 				// Скорее всего роуминг пишем только файлы
-
-				//для расчета постфактум
-				//CDRPerSec.Inc(cfg.Name)
-				rr, err := data.CreateCDRRecord(PoolList[PoolIndex], time.Now(), cfg.RecTypeRatio[RecTypeIndex], cfg.CDR_pattern)
-
-				CDRChanneltoFileUni[cfg.Name] <- rr
-
+				rr, err := data.CreateCDRRecord(PoolList[PoolIndex], time.Now(), cfg.RecTypeRatio[RecTypeIndex], CDRPatternTask[cfg.Name], data.RandomMSISDN(cfg.Name))
 				if err != nil {
-					ErrorChannel <- err
+					LogChannel <- LogStruct{"ERROR", err}
+				} else {
+					CDRChanneltoFileUni[cfg.Name] <- rr
+				}
+			} else {
+				skeep++
+				if skeep == PoolIndexMax {
+					ProcessPanic("pooool")
 				}
 			}
 		}
@@ -386,7 +439,6 @@ func StartTaskFile(PoolList []data.RecTypePool, cfg data.TasksType, FirstStart b
 // Запись в Фаил
 // Исправил на канал для чтения
 func StartFileCDR(task data.TasksType, InputString chan string) {
-	//func StartFileCDR(task data.TasksType, InputString <-chan string) {
 	// Запись в разные каталоги
 	var DirNum int
 	var DirNumLen int
@@ -395,30 +447,29 @@ func StartFileCDR(task data.TasksType, InputString chan string) {
 	f, err := os.Create(strings.Replace(task.PathsToSave[0]+task.Template_save_file, "{date}", time.Now().Format("20060201030405"), 1))
 
 	if err != nil {
-		ErrorChannel <- err
+		LogChannel <- LogStruct{"ERROR", err}
 	}
+
 	ProcessDebug("Start write " + f.Name())
 
 	defer f.Close()
 
-	//heartbeat := time.Tick(1 * time.Second)
-	//Переписать на создание нового файла каждую Х секнду
+	// Переcoздание файла каждве 2 секунды
 	heartbeat := time.Tick(2 * time.Second)
 
 	for {
-		//for str := range InputString {
 		select {
 		case <-heartbeat:
 			f.Close()
-			// Добавить директорию на выбор
+			// Директория меняется рандомно
 			DirNum = rand.Intn(DirNumLen)
 			f, err = os.Create(strings.Replace(task.PathsToSave[DirNum]+task.Template_save_file, "{date}", time.Now().Format("20060201030405"), 1))
 
 			if err != nil {
-				ErrorChannel <- err
+				LogChannel <- LogStruct{"ERROR", err}
 			}
 
-			//Переместить в горутину
+			// Переместить в горутину
 			ProcessDebug("Start write " + f.Name())
 
 			CDRFileCount.Inc(task.Name)
@@ -426,9 +477,9 @@ func StartFileCDR(task data.TasksType, InputString chan string) {
 		default:
 
 			str := <-InputString
-			//Перенес из генерации, в одном потоке будет работать быстрее
-			//Исключаем запись из брт
-			if brtlist.Get(task.Name) {
+			// Перенес из генерации, в одном потоке будет работать быстрее
+			// Исключаем запись из брт и Кемел
+			if brtlist.Get(task.Name) || camel {
 				CDRRecCount.Inc(task.Name + "offline")
 			} else {
 				CDRPerSec.Inc(task.Name)
@@ -437,7 +488,7 @@ func StartFileCDR(task data.TasksType, InputString chan string) {
 			_, err = f.WriteString(str + "\n")
 
 			if err != nil {
-				ErrorChannel <- err
+				LogChannel <- LogStruct{"ERROR", err}
 			}
 		}
 	}
@@ -451,12 +502,12 @@ func StartTransferCDR(FileName string, InputString <-chan string) {
 // Горутина формирования данных для вызова Diameter
 func StartTaskDiam(PoolList []data.RecTypePool, cfg data.TasksType, FirstStart bool) {
 	{
-
 		var PoolIndex int
 		var PoolIndexMax int
 		var CDR int
 		var RecTypeIndex int
 		var tmp int
+		var skeep int
 		PoolIndex = 0
 		PoolIndexMax = len(PoolList) - 1
 
@@ -464,12 +515,18 @@ func StartTaskDiam(PoolList []data.RecTypePool, cfg data.TasksType, FirstStart b
 			// Порождать доп процессы может только первый процесс
 			// Уменьшает обращение с блокировками переменной флаг
 			// при БРТ не стартует поток ВРЕМЕННО!!!
-			if FirstStart && !brt {
+			// Поток подключение по диаметру 1, боль 10к/с разогнать
+			// по одному подключению не получается
+			if FirstStart && thread {
 				if Flag.Load(cfg.Name) == 1 {
-					log.Println("INFO: Start new thead " + cfg.Name)
+					ProcessInfo("Start new thead " + cfg.Name)
 					go StartTaskDiam(PoolList, cfg, false)
 					Flag.Store(cfg.Name, 0)
 				}
+			}
+			// Выход из горутины
+			if st {
+				return
 			}
 
 			CDR = CDRPerSec.Load(cfg.Name)
@@ -477,41 +534,26 @@ func StartTaskDiam(PoolList []data.RecTypePool, cfg data.TasksType, FirstStart b
 				// Сброс счетчика
 				if PoolIndex >= PoolIndexMax {
 					PoolIndex = 0
+					skeep = 1
 				}
 
 				PoolIndex++
-
 				tmp = PoolList[PoolIndex].CallsCount
-
 				if tmp != 0 {
 
 					PoolList[PoolIndex].CallsCount = tmp - 1
-
 					RecTypeIndex = data.RandomRecType(cfg.RecTypeRatio, rand.Intn(100))
 					CDRRecTypeCount.Inc(cfg.Name, cfg.RecTypeRatio[RecTypeIndex].Name)
 
-					diam_message, sid, err := data.CreateCCREventMessage(PoolList[PoolIndex], time.Now(), cfg.RecTypeRatio[RecTypeIndex], dict.Default)
-					// Все сообщения добавляются в массив
-					// после получения кода 4011 формируется оффлайн CDR
-					if err == nil {
-						BrtOfflineCDR.Store(sid, data.TypeBrtOfflineCdr{RecPool: PoolList[PoolIndex],
-							CDRtime:     time.Now(),
-							Ratio:       cfg.RecTypeRatio[RecTypeIndex],
-							TaskName:    cfg.Name,
-							CDR_pattern: cfg.CDR_pattern})
+					// Стараемся отсылать равномерно, в условии что, пропускать уже обнуленные CallsCount
+					if slow {
+						sleep(time.Duration(time_sleep) * time.Nanosecond)
 					}
-					if err != nil {
-						CDRPerSec.Inc(cfg.Name)
-						//ErrorChannel <- err
-					} else if cfg.RecTypeRatio[RecTypeIndex].Name == "Internet" {
-						BrtDiamChannel <- data.DiamCH{TaskName: cfg.Name, Message: diam_message}
-						CDRPerSec.Inc(cfg.Name)
-					} else {
-						BrtDiamChannel <- data.DiamCH{TaskName: cfg.Name, Message: diam_message}
-						// Что бы не завалить на время тестов
-						//time.Sleep(1 * time.Second)
-						//Для БРТ считаем здесь. Пока здесь, похоже фаил пишется дольше
-						CDRPerSec.Inc(cfg.Name)
+					CreateDiamMessage(PoolList[PoolIndex], cfg.Name, cfg.RecTypeRatio[RecTypeIndex])
+				} else {
+					skeep++
+					if skeep == PoolIndexMax {
+						ProcessPanic("pooool")
 					}
 				}
 			}
@@ -523,9 +565,16 @@ func StartTaskDiam(PoolList []data.RecTypePool, cfg data.TasksType, FirstStart b
 func StartDiameterClient() {
 
 	var brt_adress []datatype.Address
+	localip := data.GetLocalIP()
 	for _, ip := range global_cfg.Common.BRT {
+		if ip == localip {
+			brt_adress = append(brt_adress, datatype.Address(net.ParseIP("127.0.0.1")))
+		}
 		brt_adress = append(brt_adress, datatype.Address(net.ParseIP(ip)))
 	}
+	brt_adress = append(brt_adress, datatype.Address(net.ParseIP(localip)))
+	// счетчик активных соединений
+	chk := 0
 
 	//прописываем конфиг
 	ProcessDebug("Load Diameter config")
@@ -547,94 +596,45 @@ func StartDiameterClient() {
 	ProcessDebug("Load Diameter dictionary")
 	ProcessDebug("Load Diameter client")
 
-	cli := &sm.Client{
-		Dict:               data.Default, //dict.Default,
-		Handler:            mux,
-		MaxRetransmits:     3,
-		RetransmitInterval: time.Second,
-		EnableWatchdog:     true,
-		WatchdogInterval:   5 * time.Second,
-
-		AuthApplicationID: []*diam.AVP{
-			//AVP Auth-Application-Id (код 258) имеет тип Unsigned32 и используется для публикации поддержки  Authentication and Authorization части diameter приложения (см. Section 2.4).
-			//Если AVP Auth-Application-Id присутствует в сообщении, отличном от CER и CEA, значение этого AVP ДОЛЖНО соответствовать Application-Id, присутствующему в заголовке этого сообщения Diameter.
-			diam.NewAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(4)), // RFC 4006
-		},
-		AcctApplicationID: []*diam.AVP{
-			// Acct-Application-Id AVP (AVP-код 259) имеет тип Unsigned32 и используется для публикации поддержки  Accountingand части diameter приложения (см. Section 2.4)
-			//Если AVP Acct-Application-Id присутствует в сообщении, отличном от CER и CEA, значение этого AVP ДОЛЖНО соответствовать Application-Id, присутствующему в заголовке этого сообщения Diameter.
-			diam.NewAVP(avp.AcctApplicationID, avp.Mbit, 0, datatype.Unsigned32(3)), //3
-		},
-
-		//Vendor-Specific-Application-Id AVP
-		//Vendor-Specific-Application-Id AVP (код 260) имеет тип Grouped и используется для публикации поддержки vendor-specific Diameter-приложения. Точно один экземпляр Auth-Application-Id или Acct-Application-Id AVP ДОЛЖЕН присутствовать в составе этого AVP. Идентификатор приложения, переносимый либо Auth-Application-Id, либо Acct-Application-Id AVP, ДОЛЖЕН соответствовать идентификатору приложения конкретного поставщика, описанному в (Section 11.3 наверное 5.3). Он ДОЛЖЕН также соответствовать идентификатору приложения, присутствующему в заголовке Diameter сообщений, за исключением  сообщении CER или CEA.
-		//
-		//AVP Vendor-Id - это информационный AVP, относящийся к поставщику, который может иметь авторство конкретного приложения Diameter. Он НЕ ДОЛЖЕН использоваться в качестве средства определения отдельного пространства идентификаторов Application-Id.
-		//
-		//AVP Vendor-Specific-Application-Id  ДОЛЖЕН быть установлен как можно ближе к заголовку Diameter.
-		//
-		//     AVP Format
-		//      <Vendor-Specific-Application-Id> ::= < AVP Header: 260 >
-		//                                           { Vendor-Id }
-		//                                           [ Auth-Application-Id ]
-		//                                          [ Acct-Application-Id ]
-		//AVP Vendor-Specific-Application-Id  ДОЛЖЕН содержать только один из идентификаторов Auth-Application-Id или Acct-Application-Id. Если AVP Vendor-Specific-Application-Id получен без одного из этих двух AVP, то получатель ДОЛЖЕН вернуть ответ с Result-Code DIAMETER_MISSING_AVP. В ответ СЛЕДУЕТ также включить Failed-AVP, который ДОЛЖЕН содержать пример AVP Auth-Application-Id и AVP Acct-Application-Id.
-		//
-		//Если получен AVP Vendor-Specific-Application-Id, содержащий оба идентификатора Auth-Application-Id и Acct-Application-Id, то получатель ДОЛЖЕН выдать ответ с Result-Code DIAMETER_AVP_OCCURS_TOO_MANY_TIMES. В ответ СЛЕДУЕТ также включить два Failed-AVP, которые содержат полученные AVP Auth-Application-Id и Acct-Application-Id.
-		VendorSpecificApplicationID: []*diam.AVP{
-			diam.NewAVP(avp.VendorSpecificApplicationID, avp.Mbit, 0, &diam.GroupedAVP{
-				AVP: []*diam.AVP{
-					diam.NewAVP(avp.VendorID, avp.Mbit, 0, datatype.Unsigned32(data.PETER_SERVICE_VENDOR_ID)),
-					diam.NewAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(4)),
-					//diam.NewAVP(avp.AcctApplicationID, avp.Mbit, 0, datatype.Unsigned32(4)),
-				},
-			}),
-		},
-		SupportedVendorID: []*diam.AVP{
-			diam.NewAVP(avp.VendorSpecificApplicationID, avp.Mbit, 0, &diam.GroupedAVP{
-				AVP: []*diam.AVP{
-					diam.NewAVP(avp.VendorID, avp.Mbit, 0, datatype.Unsigned32(data.PETER_SERVICE_VENDOR_ID)),
-					diam.NewAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(4)),
-				},
-			}),
-		},
-	}
+	// Инициализация конфига клиента
+	cli := data.Client(mux)
 
 	// Set message handlers.
 	// Можно использовать канал AnswerCCAEvent(BrtDiamChannelAnswer)
 	mux.Handle("CCA", AnswerCCAEvent())
 	mux.Handle("DWA", AnswerDWAEvent())
+	mux.Handle("ALL", AnswerALLEvent())
+	//go DiamAnswer(BrtDiamChannelAnswer)
 
 	// Запуск потока записи ошибок в лог
 	go DiamPrintErrors(mux.ErrorReports())
-	//KeepAlive WTF??
-	cli.EnableWatchdog = false //true
 
-	brt_connect := make([]diam.Conn, len(brt_adress))
-
-	var i int
-	i = 0
-
-	log.Println("DIAM: Connecting clients...")
+	ProcessDiam("Connecting clients...")
 	for _, init_connect := range global_cfg.Common.BRT {
-		ProcessDebug(init_connect)
 
+		ProcessDebug(init_connect)
 		var err error
 
-		brt_connect[i], err = Dial(cli, init_connect+":"+strconv.Itoa(global_cfg.Common.BRT_port), "", "", false, "tcp")
+		brt_connect, err := Dial(cli, init_connect+":"+strconv.Itoa(global_cfg.Common.BRT_port), "", "", false, "tcp")
+
 		if err != nil {
-			log.Println("ERROR: Connect error ")
-			log.Println(err)
+			ProcessError("Connect error ")
+			ProcessError(err)
 		} else {
 			ProcessDebug("Connect to " + init_connect + " done.")
-			// Запуск потоков записи
-			go SendCCREvent(brt_connect[i], diam_cfg, BrtDiamChannel)
-			i++
+			// Запуск потоков записи по БРТ
+			// Отмеаем что клиент запущен
+			chk++
+			go SendCCREvent(brt_connect, diam_cfg, BrtDiamChannel)
 		}
 	}
-
-	log.Println("DIAM: Done. Sending messages...")
-
+	// Проверка что клиент запущен
+	if chk > 0 {
+		ProcessDiam("Done. Sending messages...")
+	} else {
+		ProcessDiam("Stopping the client's diameter. No connection is initialized")
+		brt = false
+	}
 }
 
 // Кусок для диаметра
@@ -646,22 +646,52 @@ func Dial(cli *sm.Client, addr, cert, key string, ssl bool, networkType string) 
 	return cli.DialNetwork(networkType, addr)
 }
 
-//Обработчик-ответа Диаметра
+// Тест горутина обработки ответов диаметра
+func DiamAnswer(f chan diam.Message) {
+	for {
+		select {
+		case m := <-f:
+			s, sid := data.ResponseDiamHandler(&m, ProcessDiam, debugm)
+			CDRDiamResponseCount.Inc(strconv.Itoa(s))
+			if s == 4011 || s == 4522 || s == 4012 {
+				//logdiam.Println("DIAM: Answer CCA code: " + strconv.Itoa(s) + " Session: " + sid)
+				//переход в оффлайн
+				val := BrtOfflineCDR.Load(sid) //BrtOfflineCDR[sid]*
+				rr, err := data.CreateCDRRecord(val.RecPool, val.CDRtime, val.Ratio, CDRPatternTask[val.TaskName], val.DstMsisdn)
+				if err != nil {
+					LogChannel <- LogStruct{"ERROR", err}
+				} else {
+					CDRChanneltoFileUni[val.TaskName] <- rr
+				}
+				BrtOfflineCDR.Delete(sid)
+			} else if s == 5030 {
+				// 5030 пользователь не известен
+				BrtOfflineCDR.Delete(sid)
+			} else {
+				//logdiam.Println("DIAM: Answer CCA code: " + strconv.Itoa(s))
+				BrtOfflineCDR.Delete(sid)
+			}
+		}
+	}
+}
+
+// Обработчик-ответа Диаметра
+// f chan<- diam.Message
 func AnswerCCAEvent() diam.HandlerFunc {
-	//func AnswerCCAEvent(done chan struct{}) diam.HandlerFunc {
 	return func(c diam.Conn, m *diam.Message) {
-		//обработчик ошибок, добавить поток(канал) для офлайна?
 		// Конкуренция по ответам, запись в фаил?
-		s, sid := data.ResponseDiamHandler(m, &logdiam, debugm)
-		CDRBRTResponseCount.Inc(strconv.Itoa(s))
+		s, sid := data.ResponseDiamHandler(m, ProcessDiam, debugm)
+		CDRDiamResponseCount.Inc(strconv.Itoa(s))
+		CDRDiamRCount.Inc(c.RemoteAddr().String())
 		if s == 4011 || s == 4522 || s == 4012 {
 			//logdiam.Println("DIAM: Answer CCA code: " + strconv.Itoa(s) + " Session: " + sid)
 			//переход в оффлайн
 			val := BrtOfflineCDR.Load(sid) //BrtOfflineCDR[sid]*
-			rr, err := data.CreateCDRRecord(val.RecPool, val.CDRtime, val.Ratio, val.CDR_pattern)
-			CDRChanneltoFileUni[val.TaskName] <- rr
+			rr, err := data.CreateCDRRecord(val.RecPool, val.CDRtime, val.Ratio, CDRPatternTask[val.TaskName], val.DstMsisdn)
 			if err != nil {
-				ErrorChannel <- err
+				LogChannel <- LogStruct{"ERROR", err}
+			} else {
+				CDRChanneltoFileUni[val.TaskName] <- rr
 			}
 			BrtOfflineCDR.Delete(sid)
 		} else if s == 5030 {
@@ -671,32 +701,36 @@ func AnswerCCAEvent() diam.HandlerFunc {
 			//logdiam.Println("DIAM: Answer CCA code: " + strconv.Itoa(s))
 			BrtOfflineCDR.Delete(sid)
 		}
-
 	}
 }
 
 func AnswerDWAEvent() diam.HandlerFunc {
 	return func(c diam.Conn, m *diam.Message) {
 		//обработчик ошибок, вотч дог пишем в обычный лог
-		s, _ := data.ResponseDiamHandler(m, log.Default(), debugm)
-		log.Println("DIAM: Answer DWA code: " + strconv.Itoa(s))
+		s, _ := data.ResponseDiamHandler(m, ProcessDiam, debugm)
+		ProcessDiam("Answer " + c.RemoteAddr().String() + " DWA code:" + strconv.Itoa(s))
 	}
 }
 
-// Горутина приема и записи сообщения по диаметру в брт
+func AnswerALLEvent() diam.HandlerFunc {
+	return func(c diam.Conn, m *diam.Message) {
+		ProcessDiam(m)
+	}
+}
+
+// Горутина  записи сообщения по диаметру в брт
 func SendCCREvent(c diam.Conn, cfg *sm.Settings, in chan data.DiamCH) {
 
 	var err error
 	server, _, _ := strings.Cut(c.RemoteAddr().String(), ":")
 	// на подумать, использовать структуру, а потом ее определять или сазу передавать готовое сообщение
-	// заменить на просто вывод в лог
-	defer c.Close()
+	//defer c.Close()
 
-	heartbeat := time.Tick(5 * time.Second)
+	heartbeat := time.Tick(10 * time.Second)
 	meta, ok := smpeer.FromContext(c.Context())
 	if !ok {
-		log.Println("DIAM: Client connection does not contain metadata")
-		log.Println("DIAM: Close threads")
+		ProcessDiam("Client connection does not contain metadata")
+		ProcessDiam("Close threads")
 	}
 
 	for {
@@ -705,8 +739,8 @@ func SendCCREvent(c diam.Conn, cfg *sm.Settings, in chan data.DiamCH) {
 			// Сделать выход или переоткрытие?
 			meta, ok = smpeer.FromContext(c.Context())
 			if !ok {
-				log.Println("DIAM: Client connection does not contain metadata")
-				log.Println("DIAM: Close threads")
+				ProcessDiam("Client connection does not contain metadata")
+				ProcessDiam("Close threads")
 			}
 
 			// Настройка Watch Dog
@@ -714,29 +748,30 @@ func SendCCREvent(c diam.Conn, cfg *sm.Settings, in chan data.DiamCH) {
 			m.NewAVP(avp.OriginHost, avp.Mbit, 0, cfg.OriginHost)
 			m.NewAVP(avp.OriginRealm, avp.Mbit, 0, cfg.OriginRealm)
 			m.NewAVP(avp.OriginStateID, avp.Mbit, 0, cfg.OriginStateID)
-			log.Printf("DIAM: Sending DWR to %s", c.RemoteAddr())
+			ProcessDiam(fmt.Sprintf("Sending DWR to %s", c.RemoteAddr()))
 			_, err = m.WriteTo(c)
 			if err != nil {
-				ErrorChannel <- err
+				LogChannel <- LogStruct{"ERROR", err}
 			}
 
 		case tmp := <-in:
+			meta, ok = smpeer.FromContext(c.Context())
+			if !ok {
+				ProcessDiam("Client connection does not contain metadata")
+				ProcessDiam("Close threads")
+			}
 
 			diam_message := tmp.Message
-			//diam_message := data.CreateCCREventMessage(dict.Default)
 			diam_message.NewAVP(avp.OriginHost, avp.Mbit, 0, cfg.OriginHost)
 			diam_message.NewAVP(avp.OriginRealm, avp.Mbit, 0, cfg.OriginRealm)
 			diam_message.NewAVP(avp.DestinationRealm, avp.Mbit, 0, meta.OriginRealm)
 			diam_message.NewAVP(avp.DestinationHost, avp.Mbit, 0, meta.OriginHost)
 
-			/*logdiam.Printf("DIAM: Sending CCR to %s", c.RemoteAddr())
-			logdiam.Println(diam_message)*/
-
 			_, err = diam_message.WriteTo(c)
 			if err != nil {
-				ErrorChannel <- err
+				LogChannel <- LogStruct{"ERROR", err}
 			} else {
-				CDRBRTCount.Inc(server)
+				CDRDiamCount.Inc(server)
 			}
 
 		default:
@@ -746,9 +781,464 @@ func SendCCREvent(c diam.Conn, cfg *sm.Settings, in chan data.DiamCH) {
 
 }
 
-// Поток телнета Кемел
-// два типа каналов CDR и закрытие/переоткрытие
-// +надо сделать keepalive
+// StartDaemonMode запуск в режиме демона
+func StartDaemonMode() {
+	// запускаем отдельные потоки родительские потоки для задач из конфига
+	// родительские породождают дочерние по формуле
+	// при завершении времени останавливают дочерние и сами
+	// Добавить сигнал остановки
+
+	// Запуски Диаметр и Кемел
+	StartClient()
+
+	// Основной цикл
+	for _, thread := range global_cfg.Tasks {
+		if thread.DatapoolCsvFile == "" {
+			ProcessWarm("Please, set the file name specified for " + thread.Name)
+		} else {
+			f, err := os.Open(thread.DatapoolCsvFile)
+			if err != nil {
+				ProcessErrorAny("Unable to read input file "+thread.DatapoolCsvFile, err)
+				ProcessError("Thread " + thread.Name + " not start")
+			} else {
+				defer f.Close()
+				ProcessDebug("Start load" + thread.DatapoolCsvFile)
+
+				// read csv values using csv.Reader
+				csvReader := csv.NewReader(f)
+				// Разделитель CSV
+				csvReader.Comma = ';'
+				csv, err := csvReader.ReadAll()
+
+				// Заполнение количества звонков на абонента
+				var PoolList data.PoolSubs
+				PoolList = PoolList.CreatePoolList(csv, thread)
+
+				if err != nil {
+					ProcessError(err)
+				} else {
+					ProcessDebug("Last record ")
+					ProcessDebug(PoolList[len(PoolList)-1])
+
+					ProcessInfo("Load " + strconv.Itoa(len(PoolList)) + " records")
+
+					// Запис формируются в том числе для роуминга
+					// Пока ограничено только локальными
+					if camel {
+						go StartTaskCamel(PoolList, thread, true)
+						// Запускаем запись для офлайна - ответ брт != 0 или параметр из конфига
+						go StartFileCDR(thread, CDRChanneltoFileUni[thread.Name])
+					} else {
+						ProcessInfo("Usage options not set " + thread.Name)
+					}
+				}
+			}
+		}
+	}
+	end()
+}
+
+// Горутина формирования данных для вызова Diameter
+func StartTaskCamel(PoolList []data.RecTypePool, cfg data.TasksType, FirstStart bool) {
+	{
+		var PoolIndex int
+		var PoolIndexMax int
+		var CDR int
+		var RecTypeIndex int
+		var tmp int
+		var skeep int
+		PoolIndex = 0
+		PoolIndexMax = len(PoolList) - 1
+
+		for {
+
+			// Порождать доп процессы может только первый процесс
+			// Уменьшает обращение с блокировками переменной флаг
+			if FirstStart && thread {
+				if Flag.Load(cfg.Name) == 1 {
+					ProcessInfo("Start new thead " + cfg.Name)
+					go StartTaskCamel(PoolList, cfg, false)
+					Flag.Store(cfg.Name, 0)
+				}
+			}
+			// Выход из горутины
+			if st {
+				return
+			}
+			CDR = CDRPerSec.Load(cfg.Name)
+			if CDR < cfg.CallsPerSecond {
+				// Сброс счетчика
+				if PoolIndex >= PoolIndexMax {
+					PoolIndex = 0
+				}
+
+				PoolIndex++
+				tmp = PoolList[PoolIndex].CallsCount
+				if tmp != 0 {
+
+					PoolList[PoolIndex].CallsCount = tmp - 1
+					RecTypeIndex = data.RandomRecType(cfg.RecTypeRatio, rand.Intn(100))
+					CDRRecTypeCount.Inc(cfg.Name, cfg.RecTypeRatio[RecTypeIndex].Name)
+
+					// Стараемся отсылать равномерно
+					if slow {
+						sleep(time.Duration(time_sleep) * time.Nanosecond)
+					}
+
+					switch {
+					case cfg.RecTypeRatio[RecTypeIndex].DefaultChan == "camel":
+						if slow1 {
+							time.Sleep(time.Duration(10) * time.Second)
+						}
+						CreateCamelMessage(PoolList[PoolIndex], cfg.Name, cfg.RecTypeRatio[RecTypeIndex])
+					case cfg.RecTypeRatio[RecTypeIndex].DefaultChan == "diameter" && brt && brtlist.Get(cfg.Name):
+						CreateDiamMessage(PoolList[PoolIndex], cfg.Name, cfg.RecTypeRatio[RecTypeIndex])
+					default:
+						rr, err := data.CreateCDRRecord(PoolList[PoolIndex], time.Now(), cfg.RecTypeRatio[RecTypeIndex], CDRPatternTask[cfg.Name], data.RandomMSISDN(cfg.Name))
+						if err != nil {
+							LogChannel <- LogStruct{"ERROR", err}
+						} else {
+							CDRChanneltoFileUni[cfg.Name] <- rr
+							CDRPerSec.Inc(cfg.Name)
+						}
+					}
+				} else {
+					skeep++
+					if skeep == PoolIndexMax {
+						ProcessPanic("pooool")
+					}
+				}
+			}
+		}
+	}
+}
+
+// Старт потока Кемел
 func StartCamelServer() {
 
+	ProcessInfo("Start SCP Server")
+
+	camel_cfg := &tlv.Config{
+		Camel_port:       global_cfg.Common.CAMEL.Port,
+		Duration:         global_cfg.Common.Duration,
+		Camel_SCP_id:     uint8(tlv.Stringtobyte(global_cfg.Common.CAMEL.Camel_SCP_id)[0]),
+		Camel_SMSAddress: global_cfg.Common.CAMEL.SMSCAddress,
+		ResponseFunc:     CamelResponse(),
+		RequestFunc:      CamelSend(),
+		CamelChannel:     CamelChannel,
+	}
+
+	tmp := tlv.NewListListener()
+
+	go tlv.ServerStart(camel_cfg, tmp, debugm)
+
+	// Ждем открытие хотя бы одного соединения
+	// Потоки дочерних поднимаются листенером
+	for {
+		time.Sleep(time.Duration(5) * time.Second)
+		if len(tmp.List) > 0 {
+			break
+		}
+		ProcessInfo("Wait connet to SCP Server")
+	}
+}
+
+// Горутина записи сообщения по Camel
+func CamelSend() tlv.HandReq {
+	return func(c *tlv.Listener, in chan tlv.Camel_tcp) {
+		for {
+			select {
+			case tmprw := <-in:
+				// Прописываем id BRT
+				tmprw.Frame[0x002C].Param[13] = c.BRTId
+				tmp, _ := tmprw.Encoder()
+				if _, err = c.WriteTo(tmp); err != nil {
+					ProcessError(err)
+					if err == io.EOF {
+						c.Close()
+						tlv.DeleteCloseConn(c.Server)
+						LogChannel <- LogStruct{"INFO", c.RemoteAddr().String() + ": connection close"}
+						LogChannel <- LogStruct{"INFO", "Close threads"}
+						return
+					}
+				} else {
+					CDRCamelCount.Inc(c.RemoteAddr().String())
+				}
+			default:
+			}
+		}
+	}
+}
+
+// Обработчик-ответа Camel
+func CamelResponse() tlv.HandOK {
+	return func(c *tlv.Listener, camel tlv.Camel_tcp) {
+		var err error
+		var tmprw []byte
+		CDRCamelRCount.Inc(c.RemoteAddr().String())
+		switch {
+		case camel.Type == tlv.TYPE_AUTHORIZESMS_REJECT:
+			sid := string(camel.Frame[0x002C].Param[0:12])
+			val := CamelOfflineCDR.Load(sid)
+			rr, err := data.CreateCDRRecord(val.RecPool, val.CDRtime, val.Ratio, CDRPatternTask[val.TaskName], val.DstMsisdn)
+			if err != nil {
+				LogChannel <- LogStruct{"ERROR", err}
+			} else {
+				CDRChanneltoFileUni[val.TaskName] <- rr
+			}
+			CamelOfflineCDR.Delete(sid)
+			CDRCamelResponseCount.Inc(fmt.Sprint(int(camel.Frame[0x002C].Param[13])) + " REJECT SMS")
+		case camel.Type == tlv.TYPE_AUTHORIZESMS_CONFIRM:
+			if camel.Frame[0x0040].Param[0] == byte(0x00) {
+				sid := string(camel.Frame[0x002C].Param[0:12])
+				val := CamelOfflineCDR.Load(sid)
+				rr, err := data.CreateCDRRecord(val.RecPool, val.CDRtime, val.Ratio, CDRPatternTask[val.TaskName], val.DstMsisdn)
+				if err != nil {
+					LogChannel <- LogStruct{"ERROR", err}
+				} else {
+					CDRChanneltoFileUni[val.TaskName] <- rr
+				}
+				CamelOfflineCDR.Delete(sid)
+				CDRCamelResponseCount.Inc(fmt.Sprint(int(camel.Frame[0x002C].Param[13])) + " SMS Charge 00")
+			} else {
+				camel_req := tlv.NewCamelTCP()
+				err = camel_req.EndSMS_req(camel.Frame[0x002C].Param)
+				tmprw, err = camel_req.Encoder()
+				if err != nil {
+				}
+				if _, err = c.WriteTo(tmprw); err != nil {
+					ProcessError(err)
+					if err == io.EOF {
+						c.Close()
+						tlv.DeleteCloseConn(c.Server)
+						LogChannel <- LogStruct{"INFO", c.RemoteAddr().String() + ": connection close"}
+						return
+					}
+				}
+				CDRCamelResponseCount.Inc(fmt.Sprint(int(camel.Frame[0x002C].Param[13])) + " CONFIRM SMS")
+			}
+		case camel.Type == tlv.TYPE_ENDSMS_RESP:
+			// Удаление сессии
+			sid := string(camel.Frame[0x002C].Param[0:12])
+			CamelOfflineCDR.Delete(sid)
+			CDRCamelResponseCount.Inc(fmt.Sprint(int(camel.Frame[0x002C].Param[13])))
+		case camel.Type == tlv.TYPE_AUTHORIZEVOICE_CONFIRM:
+			if camel.Frame[0x0040].Param[0] == byte(0x00) {
+				sid := string(camel.Frame[0x002C].Param[0:12])
+				val := CamelOfflineCDR.Load(sid)
+				rr, err := data.CreateCDRRecord(val.RecPool, val.CDRtime, val.Ratio, CDRPatternTask[val.TaskName], val.DstMsisdn)
+				if err != nil {
+					LogChannel <- LogStruct{"ERROR", err}
+				} else {
+					CDRChanneltoFileUni[val.TaskName] <- rr
+				}
+				CamelOfflineCDR.Delete(sid)
+				CDRCamelResponseCount.Inc(fmt.Sprint(int(camel.Frame[0x002C].Param[13])) + " SMS Charge 00")
+			} else {
+				camel_req := tlv.NewCamelTCP()
+				err = camel_req.EndVoice_req(camel.Frame[0x002C].Param)
+				tmprw, err = camel_req.Encoder()
+				if err != nil {
+				}
+				if _, err = c.WriteTo(tmprw); err != nil {
+					ProcessError(err)
+					if err == io.EOF {
+						c.Close()
+						tlv.DeleteCloseConn(c.Server)
+						LogChannel <- LogStruct{"INFO", c.RemoteAddr().String() + ": connection close"}
+						return
+					}
+				}
+				CDRCamelResponseCount.Inc(fmt.Sprint(int(camel.Frame[0x002C].Param[13])) + " CONFIRM VOICE")
+			}
+		case camel.Type == tlv.TYPE_ENDVOICE_RESP:
+			// Удаление сессии
+			sid := string(camel.Frame[0x002C].Param[0:12])
+			CamelOfflineCDR.Delete(sid)
+			CDRCamelResponseCount.Inc(fmt.Sprint(int(camel.Frame[0x002C].Param[13])))
+		case camel.Type == tlv.TYPE_AUTHORIZEVOICE_REJECT:
+			sid := string(camel.Frame[0x002C].Param[0:12])
+			val := CamelOfflineCDR.Load(sid)
+			rr, err := data.CreateCDRRecord(val.RecPool, val.CDRtime, val.Ratio, CDRPatternTask[val.TaskName], val.DstMsisdn)
+			if err != nil {
+				LogChannel <- LogStruct{"ERROR", err}
+			} else {
+				CDRChanneltoFileUni[val.TaskName] <- rr
+			}
+			CamelOfflineCDR.Delete(sid)
+			CDRCamelResponseCount.Inc(fmt.Sprint(int(camel.Frame[0x002C].Param[13])) + " REJECT VOICE")
+		default:
+			LogChannel <- LogStruct{"INFO: Unknow command", camel.Type}
+			LogChannel <- LogStruct{"ERROR: Unknow command", camel}
+		}
+	}
+}
+
+// Вынесено отдельно для удобства
+// Функция отправки диаметр сообщения
+func CreateDiamMessage(rec data.RecTypePool, NameTask string, RecType data.RecTypeRatioType) {
+	diam_message, sid, err := data.CreateCCREventMessage(rec, time.Now(), RecType, dict.Default)
+	// Все сообщения добавляются в массив
+	// после получения кода 4011 формируется оффлайн CDR
+	// Надо понять что передается в интернет сессии к качестве абонента B
+	// Возможно будем менять в CreateCCREventMessage
+	dst := data.RandomMSISDN(NameTask)
+	if err != nil {
+		//замьючено так как не везде есть контекст Not use empty ServiceContextId
+		//LogChannel <- LogStruct{"ERROR", err}
+		//Если не смогли сформировать диаметр запрос, шлем оффлайн
+		rr, err_cdr := data.CreateCDRRecord(rec, time.Now(), RecType, CDRPatternTask[NameTask], dst)
+		if err_cdr != nil {
+			LogChannel <- LogStruct{"ERROR", err}
+		} else {
+			CDRChanneltoFileUni[NameTask] <- rr
+			CDRPerSec.Inc(NameTask)
+		}
+	} else {
+		// Все сообщения добавляются в массив
+		// после получения кода 4011 формируется оффлайн CDR
+		BrtOfflineCDR.Store(sid, data.TypeBrtOfflineCdr{RecPool: rec,
+			CDRtime:   time.Now(),
+			Ratio:     RecType,
+			TaskName:  NameTask,
+			DstMsisdn: dst})
+		BrtDiamChannel <- data.DiamCH{TaskName: NameTask, Message: diam_message}
+		//Для БРТ считаем здесь. Пока здесь, похоже фаил пишется дольше
+		CDRPerSec.Inc(NameTask)
+		CDRPerSecDiam.Inc(NameTask)
+	}
+}
+
+// Вынесено отдельно для удобства
+// Функция отправки кемел сообщения
+func CreateCamelMessage(rec data.RecTypePool, NameTask string, RecType data.RecTypeRatioType) {
+	camel := tlv.NewCamelTCP()
+	dst := data.RandomMSISDN(NameTask)
+	if RecType.Record_type == "09" || RecType.Record_type == "08" {
+		sid, err := camel.AuthorizeSMS_req(rec.Msisdn, rec.IMSI, RecType.Record_type, dst)
+
+		if err == nil {
+			CamelOfflineCDR.Store(string(sid), data.TypeBrtOfflineCdr{RecPool: rec,
+				CDRtime:   time.Now(),
+				Ratio:     RecType,
+				TaskName:  NameTask,
+				DstMsisdn: dst})
+			CamelChannel <- camel
+			CDRPerSec.Inc(NameTask)
+			CDRPerSecCamel.Inc(NameTask)
+		} else {
+			LogChannel <- LogStruct{"ERROR", err}
+		}
+	} else if RecType.Record_type == "01" || RecType.Record_type == "02" {
+		sid, err := camel.AuthorizeVoice_req(rec.Msisdn, rec.IMSI, RecType.Record_type, dst)
+
+		if err == nil {
+			CamelOfflineCDR.Store(string(sid), data.TypeBrtOfflineCdr{RecPool: rec,
+				CDRtime:   time.Now(),
+				Ratio:     RecType,
+				TaskName:  NameTask,
+				DstMsisdn: dst})
+			CamelChannel <- camel
+			CDRPerSec.Inc(NameTask)
+			CDRPerSecCamel.Inc(NameTask)
+		} else {
+			LogChannel <- LogStruct{"ERROR", err}
+		}
+	} else {
+		// Если не прописаны типы сформировать оффлайн
+		rr, err := data.CreateCDRRecord(rec, time.Now(), RecType, CDRPatternTask[NameTask], dst)
+		if err != nil {
+			LogChannel <- LogStruct{"ERROR", err}
+		} else {
+			CDRChanneltoFileUni[NameTask] <- rr
+			CDRPerSec.Inc(NameTask)
+		}
+	}
+}
+
+// Запуск Диаметра и Кемел
+func StartClient() {
+	// Запуск БРТ
+	if brt && len(brtlist) != 0 {
+		// Запуск потока БРТ
+		// Горутина запускается из функции, по количеству серверов
+		// Поток идет только по правилу один хост один пир
+		StartDiameterClient()
+	}
+
+	// Запуск Camel
+	if camel {
+		// Запуск потока Camel
+		// Горутина запускается из функции, по количеству серверов и потоков
+		StartCamelServer()
+	}
+}
+
+func init() {
+
+}
+
+func end() {
+	ProcessInfo("Start schelduler")
+	// Ждем выполнение таймаута
+	// Добавить в дальнейшем выход по событию от системы
+	time.Sleep(time.Duration(global_cfg.Common.Duration) * time.Second)
+
+	ProcessInfo("Stoping")
+	// Остановка гортин.
+	st = true
+	cancel()
+
+	// Задержка остановки, Ждем досылки ответов
+	kk := 0
+	for {
+		time.Sleep(1 * time.Second)
+		kk++
+		ProcessInfo("Stoping " + strconv.Itoa(kk) + "s ")
+		if kk > 10 {
+			break
+		}
+	}
+
+	// Вывод статистики работы утилиты
+	for _, thread := range global_cfg.Tasks {
+		ProcessInfo("All load " + strconv.Itoa(CDRRecCount.Load(thread.Name)) + " records for " + thread.Name)
+		if tofile {
+			ProcessInfo("Save " + strconv.Itoa(CDRFileCount.Load(thread.Name)) + " files for " + thread.Name)
+		}
+		if brt || camel {
+			ProcessInfo("Save offline " + strconv.Itoa(CDRRecCount.Load(thread.Name+"offline")) + " CDR for " + thread.Name)
+		}
+	}
+	if brt {
+		for _, ip := range global_cfg.Common.BRT {
+			ProcessInfo("Send " + strconv.Itoa(CDRDiamCount.Load(ip)) + " Diameter messages to " + ip)
+		}
+		CDRDiamResponseCount.LoadRangeToLogFunc("Diameter response code ", ProcessInfo)
+	}
+	if camel {
+		CDRCamelCount.LoadRangeToLogFunc("Camel messages ", ProcessInfo)
+		CDRCamelResponseCount.LoadRangeToLogFunc("Camel response code BRT id ", ProcessInfo)
+	}
+
+	ProcessInfo("End schelduler")
+
+	//Удалить
+	if brt || camel {
+
+		if len(BrtOfflineCDR.CDROffline) > 0 {
+			ProcessDebug(len(BrtOfflineCDR.CDROffline))
+			ProcessDebug(BrtOfflineCDR.Random())
+			CDRDiamRCount.LoadRangeToLogFunc("BRT messages revc ", ProcessInfo)
+		}
+		if len(CamelOfflineCDR.CDROffline) > 0 {
+			ProcessDebug(len(CamelOfflineCDR.CDROffline))
+		}
+		CDRCamelRCount.LoadRangeToLogFunc("Camel messages revc ", ProcessInfo)
+	}
+
+	// Очищаем директории
+	if rm {
+		delfilefortest()
+	}
 }

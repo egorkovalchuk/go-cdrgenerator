@@ -2,7 +2,6 @@ package data
 
 import (
 	"errors"
-	"log"
 	"math/rand"
 	"regexp"
 	"strconv"
@@ -13,6 +12,7 @@ import (
 	"github.com/fiorix/go-diameter/v4/diam/avp"
 	"github.com/fiorix/go-diameter/v4/diam/datatype"
 	"github.com/fiorix/go-diameter/v4/diam/dict"
+	"github.com/fiorix/go-diameter/v4/diam/sm"
 )
 
 // VENDOR_ID "Peter-Service Ltd."
@@ -290,6 +290,62 @@ type DiamCH struct {
 	Message  *diam.Message
 }
 
+// Инициализация клиента
+func Client(mux *sm.StateMachine) *sm.Client {
+	return &sm.Client{
+		Dict:               Default, //dict.Default,
+		Handler:            mux,
+		MaxRetransmits:     3,
+		RetransmitInterval: time.Second,
+		EnableWatchdog:     false, // Реализован на стороне приложения
+		WatchdogInterval:   5 * time.Second,
+
+		AuthApplicationID: []*diam.AVP{
+			//AVP Auth-Application-Id (код 258) имеет тип Unsigned32 и используется для публикации поддержки  Authentication and Authorization части diameter приложения (см. Section 2.4).
+			//Если AVP Auth-Application-Id присутствует в сообщении, отличном от CER и CEA, значение этого AVP ДОЛЖНО соответствовать Application-Id, присутствующему в заголовке этого сообщения Diameter.
+			diam.NewAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(4)), // RFC 4006
+		},
+		AcctApplicationID: []*diam.AVP{
+			// Acct-Application-Id AVP (AVP-код 259) имеет тип Unsigned32 и используется для публикации поддержки  Accountingand части diameter приложения (см. Section 2.4)
+			//Если AVP Acct-Application-Id присутствует в сообщении, отличном от CER и CEA, значение этого AVP ДОЛЖНО соответствовать Application-Id, присутствующему в заголовке этого сообщения Diameter.
+			diam.NewAVP(avp.AcctApplicationID, avp.Mbit, 0, datatype.Unsigned32(3)), //3
+		},
+
+		//Vendor-Specific-Application-Id AVP
+		//Vendor-Specific-Application-Id AVP (код 260) имеет тип Grouped и используется для публикации поддержки vendor-specific Diameter-приложения. Точно один экземпляр Auth-Application-Id или Acct-Application-Id AVP ДОЛЖЕН присутствовать в составе этого AVP. Идентификатор приложения, переносимый либо Auth-Application-Id, либо Acct-Application-Id AVP, ДОЛЖЕН соответствовать идентификатору приложения конкретного поставщика, описанному в (Section 11.3 наверное 5.3). Он ДОЛЖЕН также соответствовать идентификатору приложения, присутствующему в заголовке Diameter сообщений, за исключением  сообщении CER или CEA.
+		//
+		//AVP Vendor-Id - это информационный AVP, относящийся к поставщику, который может иметь авторство конкретного приложения Diameter. Он НЕ ДОЛЖЕН использоваться в качестве средства определения отдельного пространства идентификаторов Application-Id.
+		//
+		//AVP Vendor-Specific-Application-Id  ДОЛЖЕН быть установлен как можно ближе к заголовку Diameter.
+		//
+		//     AVP Format
+		//      <Vendor-Specific-Application-Id> ::= < AVP Header: 260 >
+		//                                           { Vendor-Id }
+		//                                           [ Auth-Application-Id ]
+		//                                          [ Acct-Application-Id ]
+		//AVP Vendor-Specific-Application-Id  ДОЛЖЕН содержать только один из идентификаторов Auth-Application-Id или Acct-Application-Id. Если AVP Vendor-Specific-Application-Id получен без одного из этих двух AVP, то получатель ДОЛЖЕН вернуть ответ с Result-Code DIAMETER_MISSING_AVP. В ответ СЛЕДУЕТ также включить Failed-AVP, который ДОЛЖЕН содержать пример AVP Auth-Application-Id и AVP Acct-Application-Id.
+		//
+		//Если получен AVP Vendor-Specific-Application-Id, содержащий оба идентификатора Auth-Application-Id и Acct-Application-Id, то получатель ДОЛЖЕН выдать ответ с Result-Code DIAMETER_AVP_OCCURS_TOO_MANY_TIMES. В ответ СЛЕДУЕТ также включить два Failed-AVP, которые содержат полученные AVP Auth-Application-Id и Acct-Application-Id.
+		VendorSpecificApplicationID: []*diam.AVP{
+			diam.NewAVP(avp.VendorSpecificApplicationID, avp.Mbit, 0, &diam.GroupedAVP{
+				AVP: []*diam.AVP{
+					diam.NewAVP(avp.VendorID, avp.Mbit, 0, datatype.Unsigned32(PETER_SERVICE_VENDOR_ID)),
+					diam.NewAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(4)),
+					//diam.NewAVP(avp.AcctApplicationID, avp.Mbit, 0, datatype.Unsigned32(4)),
+				},
+			}),
+		},
+		SupportedVendorID: []*diam.AVP{
+			diam.NewAVP(avp.VendorSpecificApplicationID, avp.Mbit, 0, &diam.GroupedAVP{
+				AVP: []*diam.AVP{
+					diam.NewAVP(avp.VendorID, avp.Mbit, 0, datatype.Unsigned32(PETER_SERVICE_VENDOR_ID)),
+					diam.NewAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(4)),
+				},
+			}),
+		},
+	}
+}
+
 // Формирование сообщения
 func CreateCCREventMessage(Msisdn RecTypePool, date time.Time, RecordType RecTypeRatioType, dict *dict.Parser) (*diam.Message, string, error) {
 	// Описание что добавить RatingGroup - может быть списком
@@ -318,18 +374,15 @@ func CreateCCREventMessage(Msisdn RecTypePool, date time.Time, RecordType RecTyp
 		AVP: []*diam.AVP{
 			diam.NewAVP(avp.SubscriptionIDType, avp.Mbit, 0, datatype.Enumerated(0)),
 			diam.NewAVP(avp.SubscriptionIDData, avp.Mbit, 0, datatype.UTF8String(Msisdn.Msisdn)), //"79251470282")),
-			//diam.NewAVP(avp.SubscriptionIDData, avp.Mbit, 0, datatype.UTF8String("79251470282")),
 		},
 	})
 	diam_message.NewAVP(avp.SubscriptionID, avp.Mbit, 0, &diam.GroupedAVP{
 		AVP: []*diam.AVP{
 			diam.NewAVP(avp.SubscriptionIDType, avp.Mbit, 0, datatype.Enumerated(1)),
 			diam.NewAVP(avp.SubscriptionIDData, avp.Mbit, 0, datatype.UTF8String(Msisdn.IMSI)), //"250020153589056")),
-			//diam.NewAVP(avp.SubscriptionIDData, avp.Mbit, 0, datatype.UTF8String("250020153589056")),
 		},
 	})
 	diam_message.NewAVP(avp.UserName, avp.Mbit, 0, datatype.UTF8String(Msisdn.Msisdn)) //"79251470282"))
-	//diam_message.NewAVP(avp.UserName, avp.Mbit, 0, datatype.UTF8String("79251470282"))
 
 	//{ Event-Timestamp }  Время события
 	diam_message.NewAVP(avp.EventTimestamp, avp.Mbit, 0, datatype.Time(time.Now()))
@@ -433,7 +486,7 @@ func CreateCCREventMessage(Msisdn RecTypePool, date time.Time, RecordType RecTyp
 }
 
 // Обработчик ответа, возвращает код ответа и сессию
-func ResponseDiamHandler(message *diam.Message, log *log.Logger, debug bool) (int, string) {
+func ResponseDiamHandler(message *diam.Message, f func(logtext interface{}), debug bool) (int, string) {
 
 	var err error
 	// универсальный формирование ответа
@@ -447,35 +500,39 @@ func ResponseDiamHandler(message *diam.Message, log *log.Logger, debug bool) (in
 	} else {
 		op += cmd.Short + "A"
 	}*/
+	//ans := "DIAM: Answer " + op + " code:"
 
 	// выделение кода ответа
-	mm, _ := message.FindAVPs(268, 0)
-	//var diamcode string
-	//ans := "DIAM: Answer " + op + " code:"
+	mm, err := message.FindAVPs(268, 0)
+	if err != nil {
+		f(message)
+	}
+
 	resp_code := 0
 	s := 0
 	for _, i := range mm {
 		t := ConvertType(i)
-		//ans += t + ";"
 		if s, err = strconv.Atoi(t); s > resp_code {
 			if err == nil {
 				resp_code = s
 			}
-
 		}
 	}
 
-	// log.Println(ans)
 	// Текст ошибки
 	mm, _ = message.FindAVPs(avp.ErrorMessage, 0)
 	for _, i := range mm {
-		log.Println("ERROR: " + ConvertType(i))
+		f(" ResponseDiamHandler: " + ConvertType(i))
 	}
 
+	// Получение SID
 	if message.Header.CommandCode == 272 {
-		m, _ := message.FindAVP(263, 0)
+		m, r1 := message.FindAVP(263, 0)
+		if r1 != nil {
+			f(message)
+		}
 		if m.String() == "" {
-			log.Println("ERROR: " + ConvertType(m))
+			f(" ResponseDiamHandler: " + ConvertType(m))
 		}
 		return s, ConvertType(m)
 	} else {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -23,8 +24,19 @@ type CommonType struct {
 	BRT_port        int
 	BRT_OriginHost  string
 	BRT_OriginRealm string
-	CAMEL_port      int
-	DateRange       struct {
+	CAMEL           struct {
+		Port         int    `json:"Port"`
+		SMSCAddress  string `json:"SMSCAddress"`
+		Camel_SCP_id string `json:"Camel_SCP_id"`
+	} `json:"CAMEL"`
+	Report struct {
+		Influx       bool   `json:"Influx"`
+		LoginInflux  string `json:"LoginInflux"`
+		PassInflux   string `json:"PassInflux"`
+		InfluxServer string `json:"InfluxServer"`
+		Region       string `json:"Region"`
+	} `json:"Report"`
+	DateRange struct {
 		Start string `json:"start"`
 		End   string `json:"end"`
 		Freq  string `json:"freq"`
@@ -44,8 +56,10 @@ type TasksType struct {
 	// Тип записи
 	RecTypeRatio []RecTypeRatioType `json:"rec_type_ratio"`
 	// Два параметра определяющее количество звонков на абоненте с распределением по процентам
-	Percentile []float64 `json:"percentile"`
-	CallsRange []int     `json:"calls_range"`
+	CallsRange struct {
+		Percentile []float64 `json:"percentile"`
+		Range      []int     `json:"range"`
+	} `json:"CallsRange"`
 	// имя файла датапула
 	DatapoolCsvFile string `json:"datapool_csv_file"`
 	// Путь для сохранения файлов
@@ -53,10 +67,11 @@ type TasksType struct {
 	// Шаблон сохранения файла
 	Template_save_file string `json:"template_save_file"`
 	// Паттерн для для СДР
-	CDR_pattern string `json:"cdr_pattern"`
+	CDR_pattern     string `json:"cdr_pattern"`
+	DefaultMSISDN_B string `json:"DefaultMSISDN_B"`
 }
 
-// Тип структуры описания логического вызова, сервис кодов
+//Тип структуры описания логического вызова, сервис кодов
 type RecTypeRatioType struct {
 	Record_type      string `json:"record_type"`
 	Name             string `json:"name"`
@@ -66,11 +81,12 @@ type RecTypeRatioType struct {
 	ServiceContextId string `json:"service_context_id"`
 	MeasureType      string `json:"measure"`
 	RatingGroup      int    `json:"rating_group"`
+	DefaultChan      string `json:"default"`
 	RangeMin         int
 	RangeMax         int
 }
 
-// Структура строки пула
+//Структура строки пула
 type RecTypePool struct {
 	Msisdn     string
 	IMSI       string
@@ -81,11 +97,26 @@ type PoolSubs []RecTypePool
 
 // Сткуртура для массива пост обработки
 type TypeBrtOfflineCdr struct {
-	RecPool     RecTypePool
-	CDRtime     time.Time
-	Ratio       RecTypeRatioType
-	TaskName    string
-	CDR_pattern string
+	RecPool  RecTypePool
+	CDRtime  time.Time
+	Ratio    RecTypeRatioType
+	TaskName string
+	// для кемел
+	DstMsisdn string
+	// duration
+	// lac cell
+}
+
+// Пишем логи через горутину
+type LogStruct struct {
+	t    string
+	text interface{}
+}
+
+// Структура для хранения паттерна
+type CDRPatternType struct {
+	Pattern string
+	MsisdnB string
 }
 
 func (cfg *Config) ReadConf(confname string) {
@@ -106,16 +137,19 @@ func (cfg *Config) ReadConf(confname string) {
 
 }
 
-// Вызов справки
+//Вызов справки
 func HelpStart() {
 	fmt.Println("Use -d start deamon mode")
 	fmt.Println("Use -s stop deamon mode")
 	fmt.Println("Use -debug start with debug mode")
-	fmt.Println("Use -file save cdr to files")
+	fmt.Println("Use -file save cdr to files(Offline)")
 	fmt.Println("Use -brt message(cdr) transmission by diameter to the billing server ")
+	fmt.Println("Use -brtlist task list (local,roam)")
+	fmt.Println("Use -camel for UP SCP Server(Camel protocol)")
+	fmt.Println("Use -rm Delete all files in directories(Test optional)")
 }
 
-// Заполнение массива для последующей генерации нагрузки
+//Заполнение массива для последующей генерации нагрузки
 func (p PoolSubs) CreatePoolList(data [][]string, Task TasksType) PoolSubs {
 	var PoolList PoolSubs
 	for i, line := range data {
@@ -133,11 +167,11 @@ func (p PoolSubs) CreatePoolList(data [][]string, Task TasksType) PoolSubs {
 // Заполнение количествово выбора на абонента
 func (p *TasksType) GenCallCount() int {
 	perc := rand.Float64()
-	arraylen := len(p.Percentile)
+	arraylen := len(p.CallsRange.Percentile)
 	var callcount int
 	for i := 0; i < arraylen; i++ {
-		if perc >= p.Percentile[i] && perc <= p.Percentile[i+1] {
-			callcount = rand.Intn(p.CallsRange[i+1])
+		if perc >= p.CallsRange.Percentile[i] && perc <= p.CallsRange.Percentile[i+1] {
+			callcount = rand.Intn(p.CallsRange.Range[i+1])
 			break
 		}
 	}
@@ -165,11 +199,12 @@ func FloatToString(input_num float64) string {
 
 // Формирование записи для CDR
 // Формируется из шаблона с заменой
-func CreateCDRRecord(RecordMsisdn RecTypePool, date time.Time, RecordType RecTypeRatioType, cfg string) (string, error) {
+// Переменная DstMsisdn если не задана, то используется значение по умолчанию
+func CreateCDRRecord(RecordMsisdn RecTypePool, date time.Time, RecordType RecTypeRatioType, cfg CDRPatternType, DstMsisdn string) (string, error) {
 	// Номер записи, добавить генерацию
 	rec_number := time.Now().Format("0201030405")
 	//TasksType.CDR_pattern
-	CDR_pattern := cfg
+	CDR_pattern := cfg.Pattern
 
 	CDR_pattern = strings.Replace(CDR_pattern, "{rec_type}", RecordType.Record_type, 1)
 	CDR_pattern = strings.Replace(CDR_pattern, "{type_code}", RecordType.TypeCode, 1)
@@ -178,6 +213,11 @@ func CreateCDRRecord(RecordMsisdn RecTypePool, date time.Time, RecordType RecTyp
 	CDR_pattern = strings.Replace(CDR_pattern, "{msisdn}", RecordMsisdn.Msisdn, 1)
 	CDR_pattern = strings.Replace(CDR_pattern, "{rec_number}", rec_number, 1)
 	CDR_pattern = strings.Replace(CDR_pattern, "{datetime}", date.Format("20060102030405"), 1)
+	if DstMsisdn != "" {
+		CDR_pattern = strings.Replace(CDR_pattern, "{msisdnB}", DstMsisdn, 1)
+	} else {
+		CDR_pattern = strings.Replace(CDR_pattern, "{msisdnB}", cfg.MsisdnB, 1)
+	}
 
 	return CDR_pattern, nil
 }
@@ -225,12 +265,33 @@ func (c *Counters) IncN(key string, inc int) {
 	c.mx.Unlock()
 }
 
+// Загрузка в лог
 func (c *Counters) LoadRangeToLog(s string, log *log.Logger) {
 	c.mx.Lock()
 	for k, v := range c.m {
 		log.Println(s + k + ": " + strconv.Itoa(v))
 	}
 	c.mx.Unlock()
+}
+
+// Загрузка в лог через функцию
+func (c *Counters) LoadRangeToLogFunc(s string, f func(logtext interface{})) {
+	c.mx.Lock()
+	for k, v := range c.m {
+		f(s + k + ": " + strconv.Itoa(v))
+	}
+	c.mx.Unlock()
+}
+
+// Возврат карты
+func (c *Counters) LoadMapSpeed(tmp map[string]int, Name string, Region string, ReportStat chan string, f func(logtext interface{})) map[string]int {
+	c.mx.Lock()
+	for i, j := range c.m {
+		ReportStat <- "cdr_" + Name + "_resp,region=" + Region + ",task_name=all,Resp_code=" + strings.ReplaceAll(i, " ", "_") + " speed=" + strconv.Itoa((j-tmp[i])/10)
+		tmp[i] = j
+	}
+	defer c.mx.Unlock()
+	return tmp
 }
 
 // map c mutex
@@ -255,7 +316,7 @@ func (c *FlagType) Load(key string) int {
 	return val
 }
 
-// Загрузить значение
+//Загрузить значение
 func (c *FlagType) Store(key string, value int) {
 	c.mx.Lock()
 	c.m[key] = value
@@ -294,7 +355,7 @@ func (c *RecTypeCounters) Load(key1 string, key2 string) int {
 	return val
 }
 
-// Загрузить значение
+//Загрузить значение
 func (c *RecTypeCounters) Store(key1 string, key2 string, value int) {
 	c.mx.Lock()
 	c.m[key1][key2] = value
@@ -344,7 +405,7 @@ func (i *ArgListType) Get(value string) bool {
 	return false
 }
 
-// Массив для работы с кешем запросов
+//Массив для работы с кешем запросов
 type BrtOfflineCdr struct {
 	mx         sync.RWMutex
 	CDROffline map[string](TypeBrtOfflineCdr)
@@ -377,4 +438,45 @@ func (c *BrtOfflineCdr) Delete(key string) {
 	c.mx.Lock()
 	delete(c.CDROffline, key)
 	c.mx.Unlock()
+}
+
+// Рандомное значение
+func (c *BrtOfflineCdr) Random() (rr string) {
+	c.mx.Lock()
+	k := rand.Intn(len(c.CDROffline))
+	for d, r1 := range c.CDROffline {
+		if k == 0 {
+			c.mx.Unlock()
+			return d + fmt.Sprint(r1)
+		}
+		k--
+	}
+	c.mx.Unlock()
+	return rr
+}
+
+// Генерация номера
+func RandomMSISDN(tsk string) string {
+	if tsk == "roam" {
+		// логика для международных
+		return ""
+	} else {
+		return "79" + strconv.Itoa(rand.Intn(100)) + strconv.Itoa(rand.Intn(10000000))
+	}
+}
+
+func GetLocalIP() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+	for _, address := range addrs {
+		// check the address type and if it is not a loopback the display it
+		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				return ipnet.IP.String()
+			}
+		}
+	}
+	return ""
 }

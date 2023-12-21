@@ -11,22 +11,28 @@ import (
 	"github.com/fiorix/go-diameter/v4/diam"
 )
 
-//Просто запись в лог
+type LogStruct struct {
+	t    string
+	text interface{}
+}
+
+// Просто запись в лог
 func LogWrite(err error) {
 	if startdaemon {
-		log.Println(err)
+		LogChannel <- LogStruct{"ERROR", err}
 	} else {
 		fmt.Println(err)
 	}
 }
 
 // Запись ошибок из горутин
-func LogWriteForGoRutine(err chan error) {
-	for err := range err {
-		datetime := time.Now().Local().Format("2006/02/01 15:04:05 ")
-		log.SetPrefix(datetime + "ERROR: ")
+// можно добавить ротейт по дате + архив в отдельном потоке
+func LogWriteForGoRutineStruct(err chan LogStruct) {
+	for i := range err {
+		datetime := time.Now().Local().Format("2006/01/02 15:04:05")
+		log.SetPrefix(datetime + " " + i.t + ": ")
 		log.SetFlags(0)
-		log.Println(err)
+		log.Println(i.text)
 		log.SetPrefix("")
 		log.SetFlags(log.Ldate | log.Ltime)
 	}
@@ -35,12 +41,7 @@ func LogWriteForGoRutine(err chan error) {
 // Запись ошибок из горутин для диаметра
 func DiamPrintErrors(ec <-chan *diam.ErrorReport) {
 	for err := range ec {
-		datetime := time.Now().Local().Format("2006/02/01 15:04:05 ")
-		log.SetPrefix(datetime + "DIAM: ")
-		log.SetFlags(0)
-		log.Println(err)
-		log.SetPrefix("")
-		log.SetFlags(log.Ldate | log.Ltime)
+		LogChannel <- LogStruct{"DIAM", err}
 	}
 }
 
@@ -48,42 +49,82 @@ func DiamPrintErrors(ec <-chan *diam.ErrorReport) {
 // Сделать горутиной?
 func ProcessDebug(logtext interface{}) {
 	if debugm {
-		// изменить интерыейс?
-		datetime := time.Now().Local().Format("2006/02/01 15:04:05 ")
-		log.SetPrefix(datetime + "DEBUG: ")
-		log.SetFlags(0)
-		log.Println(logtext)
-		log.SetPrefix("")
-		log.SetFlags(log.Ldate | log.Ltime)
+		LogChannel <- LogStruct{"DEBUG", logtext}
 	}
 }
 
+// Запись в лог ошибок
+func ProcessError(logtext interface{}) {
+	LogChannel <- LogStruct{"ERROR", logtext}
+}
+
+// Запись в лог ошибок cсо множеством переменных
+func ProcessErrorAny(logtext ...interface{}) {
+	t := ""
+	for _, a := range logtext {
+		t += fmt.Sprint(a) + " "
+	}
+	LogChannel <- LogStruct{"ERROR", t}
+}
+
+// Запись в лог WARM
+func ProcessWarm(logtext interface{}) {
+	LogChannel <- LogStruct{"WARM", logtext}
+}
+
+// Запись в лог INFO
+func ProcessInfo(logtext interface{}) {
+	LogChannel <- LogStruct{"INFO", logtext}
+}
+
+// Запись в лог Diam
+func ProcessDiam(logtext interface{}) {
+	LogChannel <- LogStruct{"DIAM", logtext}
+}
+
+// Запись в лог Camel
+func ProcessCamel(logtext interface{}) {
+	LogChannel <- LogStruct{"CAMEL", logtext}
+}
+
+// Запись в лог Influx
+func ProcessInflux(logtext interface{}) {
+	LogChannel <- LogStruct{"INFLUX", logtext}
+}
+
 // Нештатное завершение при критичной ошибке
-func ProcessError(err error) {
-	fmt.Println(err)
+func ProcessPanic(logtext interface{}) {
+	fmt.Println(logtext)
 	os.Exit(2)
 }
 
 // Инициализация переменных
 func InitVariables() {
-	//Если не задан параметр используем дефольтное значение
+	//Если не задан параметр используем дефолтное значение
 	if global_cfg.Common.Duration == 0 {
-		log.Println("Script use default duration - 14400 sec")
+		LogChannel <- LogStruct{"INFO", "Script use default duration - 14400 sec"}
 		global_cfg.Common.Duration = 14400
 	}
+
+	time_sleep = 1000000 / global_cfg.Common.Duration
 
 	// Обнуляем счетчик и инициализируем
 	for _, task := range global_cfg.Tasks {
 		// Иницмализация счетчика
 		CDRPerSec.Store(task.Name, 0)
+		CDRPerSecCamel.Store(task.Name, 0)
+		CDRPerSecDiam.Store(task.Name, 0)
 		// Инициализация флага запуска дополнительной горутины
 		Flag.Store(task.Name, 0)
-		//Инициализация каналов
+		// Инициализация каналов
 		CDRChanneltoFileUni[task.Name] = make(chan string)
-		CDRChanneltoBRTUni[task.Name] = make(chan string)
+		// Инициализация CDR_pattern
+		CDRPatternTask[task.Name] = data.CDRPatternType{
+			Pattern: task.CDR_pattern,
+			MsisdnB: task.DefaultMSISDN_B}
 
 		//Добавлено для тестов, по идее использовать CDRChanneltoBRTUni
-		BrtDiamChannelAnswer = make(chan struct{}, 1000)
+		BrtDiamChannelAnswer = make(chan diam.Message, 1000)
 		BrtDiamChannel = make(chan data.DiamCH, 1000)
 
 		// Заполнение интервалов для радндомайзера
@@ -105,7 +146,32 @@ func InitVariables() {
 
 	// Счетчик записи в БРТ
 	for _, ip := range global_cfg.Common.BRT {
-		CDRBRTCount.Store(ip, 0)
+		CDRDiamCount.Store(ip, 0)
 	}
 
+}
+
+// Аналог Sleep.
+func sleep(d time.Duration) {
+	<-time.After(d)
+}
+
+func delfilefortest() {
+	// Удаляем файлы в директорий их конфига
+	for _, i := range global_cfg.Tasks {
+		for _, j := range i.PathsToSave {
+			directory := j
+			readDirectory, _ := os.Open(directory)
+			allFiles, _ := readDirectory.Readdir(0)
+
+			for f := range allFiles {
+				file := allFiles[f]
+
+				fileName := file.Name()
+				filePath := directory + fileName
+
+				os.Remove(filePath)
+			}
+		}
+	}
 }

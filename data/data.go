@@ -71,7 +71,7 @@ type TasksType struct {
 	DefaultMSISDN_B string `json:"DefaultMSISDN_B"`
 }
 
-//Тип структуры описания логического вызова, сервис кодов
+// Тип структуры описания логического вызова, сервис кодов
 type RecTypeRatioType struct {
 	Record_type      string `json:"record_type"`
 	Name             string `json:"name"`
@@ -86,7 +86,7 @@ type RecTypeRatioType struct {
 	RangeMax         int
 }
 
-//Структура строки пула
+// Структура строки пула
 type RecTypePool struct {
 	Msisdn     string
 	IMSI       string
@@ -137,7 +137,7 @@ func (cfg *Config) ReadConf(confname string) {
 
 }
 
-//Вызов справки
+// Вызов справки
 func HelpStart() {
 	fmt.Println("Use -d start deamon mode")
 	fmt.Println("Use -s stop deamon mode")
@@ -149,7 +149,7 @@ func HelpStart() {
 	fmt.Println("Use -rm Delete all files in directories(Test optional)")
 }
 
-//Заполнение массива для последующей генерации нагрузки
+// Заполнение массива для последующей генерации нагрузки
 func (p PoolSubs) CreatePoolList(data [][]string, Task TasksType) PoolSubs {
 	var PoolList PoolSubs
 	for i, line := range data {
@@ -162,6 +162,12 @@ func (p PoolSubs) CreatePoolList(data [][]string, Task TasksType) PoolSubs {
 		}
 	}
 	return PoolList
+}
+
+func (p PoolSubs) ReinitializationPoolList(Task TasksType) {
+	for i, _ := range p {
+		p[i].CallsCount = Task.GenCallCount()
+	}
 }
 
 // Заполнение количествово выбора на абонента

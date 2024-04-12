@@ -378,7 +378,7 @@ func Monitor() {
 }
 
 // Горутина формирования CDR для файла
-func StartTaskFile(PoolList []data.RecTypePool, cfg data.TasksType, FirstStart bool) {
+func StartTaskFile(PoolList data.PoolSubs, cfg data.TasksType, FirstStart bool) {
 
 	var PoolIndex int
 	var PoolIndexMax int
@@ -405,7 +405,7 @@ func StartTaskFile(PoolList []data.RecTypePool, cfg data.TasksType, FirstStart b
 			// Сброс счетчика
 			if PoolIndex >= PoolIndexMax {
 				PoolIndex = 0
-				skeep = 1
+				skeep = 0
 			}
 
 			PoolIndex++
@@ -429,7 +429,8 @@ func StartTaskFile(PoolList []data.RecTypePool, cfg data.TasksType, FirstStart b
 			} else {
 				skeep++
 				if skeep == PoolIndexMax {
-					ProcessPanic("pooool")
+					ProcessInfo("Re-redaing pool")
+					PoolList.ReinitializationPoolList(cfg)
 				}
 			}
 		}
@@ -500,7 +501,7 @@ func StartTransferCDR(FileName string, InputString <-chan string) {
 }
 
 // Горутина формирования данных для вызова Diameter
-func StartTaskDiam(PoolList []data.RecTypePool, cfg data.TasksType, FirstStart bool) {
+func StartTaskDiam(PoolList data.PoolSubs, cfg data.TasksType, FirstStart bool) {
 	{
 		var PoolIndex int
 		var PoolIndexMax int
@@ -534,7 +535,7 @@ func StartTaskDiam(PoolList []data.RecTypePool, cfg data.TasksType, FirstStart b
 				// Сброс счетчика
 				if PoolIndex >= PoolIndexMax {
 					PoolIndex = 0
-					skeep = 1
+					skeep = 0
 				}
 
 				PoolIndex++
@@ -553,7 +554,8 @@ func StartTaskDiam(PoolList []data.RecTypePool, cfg data.TasksType, FirstStart b
 				} else {
 					skeep++
 					if skeep == PoolIndexMax {
-						ProcessPanic("pooool")
+						ProcessInfo("Re-redaing pool")
+						PoolList.ReinitializationPoolList(cfg)
 					}
 				}
 			}
@@ -839,7 +841,7 @@ func StartDaemonMode() {
 }
 
 // Горутина формирования данных для вызова Diameter
-func StartTaskCamel(PoolList []data.RecTypePool, cfg data.TasksType, FirstStart bool) {
+func StartTaskCamel(PoolList data.PoolSubs, cfg data.TasksType, FirstStart bool) {
 	{
 		var PoolIndex int
 		var PoolIndexMax int
@@ -870,6 +872,7 @@ func StartTaskCamel(PoolList []data.RecTypePool, cfg data.TasksType, FirstStart 
 				// Сброс счетчика
 				if PoolIndex >= PoolIndexMax {
 					PoolIndex = 0
+					skeep = 0
 				}
 
 				PoolIndex++
@@ -905,7 +908,8 @@ func StartTaskCamel(PoolList []data.RecTypePool, cfg data.TasksType, FirstStart 
 				} else {
 					skeep++
 					if skeep == PoolIndexMax {
-						ProcessPanic("pooool")
+						ProcessInfo("Re-redaing pool")
+						PoolList.ReinitializationPoolList(cfg)
 					}
 				}
 			}

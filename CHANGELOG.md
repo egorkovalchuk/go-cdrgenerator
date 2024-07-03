@@ -43,3 +43,6 @@ Added -rm optional - remove CDR files in temp directory
 ### new fearure
 Added re-reading of the pool
 ### Fix Bug
+## Vesion 0.4.5
+### new fearure
+Added Location MSC generate, use pool CELL and LAC area

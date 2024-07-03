@@ -18,7 +18,10 @@
        "CAMEL" :{
          "Port": 4868,
          "SMSCAddress": "79876543210",
-         "Camel_SCP_id": "02"
+         "Camel_SCP_id": "02",
+         "XVLR": "79876543210",
+         "ContryCode": "250",
+         "OperatorCode": "02"
        },
        "Report" :{
             "Influx": true,
@@ -78,7 +81,11 @@
              "C:/Temp/2/"
           ],
           "template_save_file" : "calls_{date}.csv",
-          "cdr_pattern": "{rec_type},{rec_number},,,{imsi},{msisdn},79391234567,{datetime},6,,,,,,,{type_ser},{type_code},,,6362,750,6362,750,,,,,,,,,,,,,,,"
+          "cdr_pattern": "{rec_type},{rec_number},,,{imsi},{msisdn},79391234567,{datetime},6,,,,,,,{type_ser},{type_code},,,6362,750,6362,750,,,,,,,,,,,,,,,",
+          "DefaultMSISDN_B": "79397106080",
+          "DefaultLAC": 6306,
+          "DefaultCELL": 0,
+          "datapool_csv_lac":"./lac_cell.csv"
        },
        {
           "Name":"roam",

@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/csv"
 	"fmt"
+	"strconv"
 
 	"log"
 	"os"
@@ -149,6 +151,46 @@ func InitVariables() {
 		CDRDiamCount.Store(ip, 0)
 	}
 
+	// Зачитывание LAC/CELL
+	for _, task := range global_cfg.Tasks {
+		if task.DatapoolCsvLac != "" {
+			f, err := os.Open(task.DatapoolCsvLac)
+			if err != nil {
+				ProcessErrorAny("Unable to read input file "+task.DatapoolCsvLac, err)
+				ProcessError("Thread " + task.Name + " not start")
+			} else {
+				defer f.Close()
+				ProcessDebug("Start load" + task.DatapoolCsvLac)
+
+				// read csv values using csv.Reader
+				csvReader := csv.NewReader(f)
+				// Разделитель CSV
+				csvReader.Comma = ';'
+				csv, err := csvReader.ReadAll()
+				if err != nil {
+					ProcessError(err)
+				} else {
+					var PoolList []data.RecTypeLACPool
+					for i, line := range csv {
+						if i > 0 { // omit header line
+							var rec data.RecTypeLACPool
+							rec.LAC, _ = strconv.Atoi(line[0])
+							rec.CELL, _ = strconv.Atoi(line[1])
+							PoolList = append(PoolList, rec)
+						}
+					}
+					LACCELLpool[task.Name] = PoolList
+					LACCELLlen[task.Name] = len(PoolList)
+				}
+			}
+		} else {
+			ProcessInfo("Pool not defined for " + task.Name)
+		}
+		if len(LACCELLpool[task.Name]) == 0 {
+			LACCELLpool[task.Name] = append(LACCELLpool[task.Name], data.RecTypeLACPool{LAC: task.DefaultLAC, CELL: task.DefaultCELL})
+			LACCELLlen[task.Name] = len(LACCELLpool[task.Name])
+		}
+	}
 }
 
 // Аналог Sleep.

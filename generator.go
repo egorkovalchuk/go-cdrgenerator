@@ -32,7 +32,7 @@ import (
 const (
 	logFileName = "generator.log"
 	pidFileName = "generator.pid"
-	versionutil = "0.4.4"
+	versionutil = "0.4.5"
 )
 
 var (
@@ -102,6 +102,10 @@ var (
 	// Канал записи статистики в БД
 	ReportStat = make(chan string, 1000)
 
+	// Срез для LAC/CELL
+	LACCELLpool = make(map[string]([]data.RecTypeLACPool))
+	LACCELLlen  = make(map[string](int))
+
 	// Маркер завершения горутин генерации нагрузки
 	st = false
 	// Тестовый параметр замедления
@@ -122,7 +126,6 @@ var (
 func main() {
 
 	//defer profile.Start(profile.MemProfile, profile.ProfilePath("C:/Temp")).Stop()
-
 	//start program
 	var argument string
 	/*var progName string
@@ -420,7 +423,8 @@ func StartTaskFile(PoolList data.PoolSubs, cfg data.TasksType, FirstStart bool) 
 				// Запись в фаил
 				// Формирование готовой строки для записи в фаил
 				// Скорее всего роуминг пишем только файлы
-				rr, err := data.CreateCDRRecord(PoolList[PoolIndex], time.Now(), cfg.RecTypeRatio[RecTypeIndex], CDRPatternTask[cfg.Name], data.RandomMSISDN(cfg.Name))
+				lc := LACCELLpool[cfg.Name][rand.Intn(LACCELLlen[cfg.Name])]
+				rr, err := data.CreateCDRRecord(PoolList[PoolIndex], time.Now(), cfg.RecTypeRatio[RecTypeIndex], CDRPatternTask[cfg.Name], data.RandomMSISDN(cfg.Name), lc)
 				if err != nil {
 					LogChannel <- LogStruct{"ERROR", err}
 				} else {
@@ -659,7 +663,7 @@ func DiamAnswer(f chan diam.Message) {
 				//logdiam.Println("DIAM: Answer CCA code: " + strconv.Itoa(s) + " Session: " + sid)
 				//переход в оффлайн
 				val := BrtOfflineCDR.Load(sid) //BrtOfflineCDR[sid]*
-				rr, err := data.CreateCDRRecord(val.RecPool, val.CDRtime, val.Ratio, CDRPatternTask[val.TaskName], val.DstMsisdn)
+				rr, err := data.CreateCDRRecord(val.RecPool, val.CDRtime, val.Ratio, CDRPatternTask[val.TaskName], val.DstMsisdn, data.RecTypeLACPool{LAC: val.Lac, CELL: val.Cell})
 				if err != nil {
 					LogChannel <- LogStruct{"ERROR", err}
 				} else {
@@ -689,7 +693,7 @@ func AnswerCCAEvent() diam.HandlerFunc {
 			//logdiam.Println("DIAM: Answer CCA code: " + strconv.Itoa(s) + " Session: " + sid)
 			//переход в оффлайн
 			val := BrtOfflineCDR.Load(sid) //BrtOfflineCDR[sid]*
-			rr, err := data.CreateCDRRecord(val.RecPool, val.CDRtime, val.Ratio, CDRPatternTask[val.TaskName], val.DstMsisdn)
+			rr, err := data.CreateCDRRecord(val.RecPool, val.CDRtime, val.Ratio, CDRPatternTask[val.TaskName], val.DstMsisdn, data.RecTypeLACPool{LAC: val.Lac, CELL: val.Cell})
 			if err != nil {
 				LogChannel <- LogStruct{"ERROR", err}
 			} else {
@@ -897,7 +901,7 @@ func StartTaskCamel(PoolList data.PoolSubs, cfg data.TasksType, FirstStart bool)
 					case cfg.RecTypeRatio[RecTypeIndex].DefaultChan == "diameter" && brt && brtlist.Get(cfg.Name):
 						CreateDiamMessage(PoolList[PoolIndex], cfg.Name, cfg.RecTypeRatio[RecTypeIndex])
 					default:
-						rr, err := data.CreateCDRRecord(PoolList[PoolIndex], time.Now(), cfg.RecTypeRatio[RecTypeIndex], CDRPatternTask[cfg.Name], data.RandomMSISDN(cfg.Name))
+						rr, err := data.CreateCDRRecord(PoolList[PoolIndex], time.Now(), cfg.RecTypeRatio[RecTypeIndex], CDRPatternTask[cfg.Name], data.RandomMSISDN(cfg.Name), LACCELLpool[cfg.Name][rand.Intn(LACCELLlen[cfg.Name])])
 						if err != nil {
 							LogChannel <- LogStruct{"ERROR", err}
 						} else {
@@ -927,6 +931,9 @@ func StartCamelServer() {
 		Duration:         global_cfg.Common.Duration,
 		Camel_SCP_id:     uint8(tlv.Stringtobyte(global_cfg.Common.CAMEL.Camel_SCP_id)[0]),
 		Camel_SMSAddress: global_cfg.Common.CAMEL.SMSCAddress,
+		XVLR:             global_cfg.Common.CAMEL.XVLR,
+		ContryCode:       global_cfg.Common.CAMEL.ContryCode,
+		OperatorCode:     global_cfg.Common.CAMEL.OperatorCode,
 		ResponseFunc:     CamelResponse(),
 		RequestFunc:      CamelSend(),
 		CamelChannel:     CamelChannel,
@@ -984,7 +991,7 @@ func CamelResponse() tlv.HandOK {
 		case camel.Type == tlv.TYPE_AUTHORIZESMS_REJECT:
 			sid := string(camel.Frame[0x002C].Param[0:12])
 			val := CamelOfflineCDR.Load(sid)
-			rr, err := data.CreateCDRRecord(val.RecPool, val.CDRtime, val.Ratio, CDRPatternTask[val.TaskName], val.DstMsisdn)
+			rr, err := data.CreateCDRRecord(val.RecPool, val.CDRtime, val.Ratio, CDRPatternTask[val.TaskName], val.DstMsisdn, data.RecTypeLACPool{LAC: val.Lac, CELL: val.Cell})
 			if err != nil {
 				LogChannel <- LogStruct{"ERROR", err}
 			} else {
@@ -996,7 +1003,7 @@ func CamelResponse() tlv.HandOK {
 			if camel.Frame[0x0040].Param[0] == byte(0x00) {
 				sid := string(camel.Frame[0x002C].Param[0:12])
 				val := CamelOfflineCDR.Load(sid)
-				rr, err := data.CreateCDRRecord(val.RecPool, val.CDRtime, val.Ratio, CDRPatternTask[val.TaskName], val.DstMsisdn)
+				rr, err := data.CreateCDRRecord(val.RecPool, val.CDRtime, val.Ratio, CDRPatternTask[val.TaskName], val.DstMsisdn, data.RecTypeLACPool{LAC: val.Lac, CELL: val.Cell})
 				if err != nil {
 					LogChannel <- LogStruct{"ERROR", err}
 				} else {
@@ -1030,7 +1037,7 @@ func CamelResponse() tlv.HandOK {
 			if camel.Frame[0x0040].Param[0] == byte(0x00) {
 				sid := string(camel.Frame[0x002C].Param[0:12])
 				val := CamelOfflineCDR.Load(sid)
-				rr, err := data.CreateCDRRecord(val.RecPool, val.CDRtime, val.Ratio, CDRPatternTask[val.TaskName], val.DstMsisdn)
+				rr, err := data.CreateCDRRecord(val.RecPool, val.CDRtime, val.Ratio, CDRPatternTask[val.TaskName], val.DstMsisdn, data.RecTypeLACPool{LAC: val.Lac, CELL: val.Cell})
 				if err != nil {
 					LogChannel <- LogStruct{"ERROR", err}
 				} else {
@@ -1063,7 +1070,7 @@ func CamelResponse() tlv.HandOK {
 		case camel.Type == tlv.TYPE_AUTHORIZEVOICE_REJECT:
 			sid := string(camel.Frame[0x002C].Param[0:12])
 			val := CamelOfflineCDR.Load(sid)
-			rr, err := data.CreateCDRRecord(val.RecPool, val.CDRtime, val.Ratio, CDRPatternTask[val.TaskName], val.DstMsisdn)
+			rr, err := data.CreateCDRRecord(val.RecPool, val.CDRtime, val.Ratio, CDRPatternTask[val.TaskName], val.DstMsisdn, data.RecTypeLACPool{LAC: val.Lac, CELL: val.Cell})
 			if err != nil {
 				LogChannel <- LogStruct{"ERROR", err}
 			} else {
@@ -1087,11 +1094,12 @@ func CreateDiamMessage(rec data.RecTypePool, NameTask string, RecType data.RecTy
 	// Надо понять что передается в интернет сессии к качестве абонента B
 	// Возможно будем менять в CreateCCREventMessage
 	dst := data.RandomMSISDN(NameTask)
+	lc := LACCELLpool[NameTask][rand.Intn(LACCELLlen[NameTask])]
 	if err != nil {
 		//замьючено так как не везде есть контекст Not use empty ServiceContextId
 		//LogChannel <- LogStruct{"ERROR", err}
 		//Если не смогли сформировать диаметр запрос, шлем оффлайн
-		rr, err_cdr := data.CreateCDRRecord(rec, time.Now(), RecType, CDRPatternTask[NameTask], dst)
+		rr, err_cdr := data.CreateCDRRecord(rec, time.Now(), RecType, CDRPatternTask[NameTask], dst, lc)
 		if err_cdr != nil {
 			LogChannel <- LogStruct{"ERROR", err}
 		} else {
@@ -1105,7 +1113,9 @@ func CreateDiamMessage(rec data.RecTypePool, NameTask string, RecType data.RecTy
 			CDRtime:   time.Now(),
 			Ratio:     RecType,
 			TaskName:  NameTask,
-			DstMsisdn: dst})
+			DstMsisdn: dst,
+			Lac:       lc.LAC,
+			Cell:      lc.CELL})
 		BrtDiamChannel <- data.DiamCH{TaskName: NameTask, Message: diam_message}
 		//Для БРТ считаем здесь. Пока здесь, похоже фаил пишется дольше
 		CDRPerSec.Inc(NameTask)
@@ -1118,15 +1128,18 @@ func CreateDiamMessage(rec data.RecTypePool, NameTask string, RecType data.RecTy
 func CreateCamelMessage(rec data.RecTypePool, NameTask string, RecType data.RecTypeRatioType) {
 	camel := tlv.NewCamelTCP()
 	dst := data.RandomMSISDN(NameTask)
+	lc := LACCELLpool[NameTask][rand.Intn(LACCELLlen[NameTask])]
 	if RecType.Record_type == "09" || RecType.Record_type == "08" {
-		sid, err := camel.AuthorizeSMS_req(rec.Msisdn, rec.IMSI, RecType.Record_type, dst)
+		sid, err := camel.AuthorizeSMS_req(rec.Msisdn, rec.IMSI, RecType.Record_type, dst, lc)
 
 		if err == nil {
 			CamelOfflineCDR.Store(string(sid), data.TypeBrtOfflineCdr{RecPool: rec,
 				CDRtime:   time.Now(),
 				Ratio:     RecType,
 				TaskName:  NameTask,
-				DstMsisdn: dst})
+				DstMsisdn: dst,
+				Lac:       lc.LAC,
+				Cell:      lc.CELL})
 			CamelChannel <- camel
 			CDRPerSec.Inc(NameTask)
 			CDRPerSecCamel.Inc(NameTask)
@@ -1134,14 +1147,16 @@ func CreateCamelMessage(rec data.RecTypePool, NameTask string, RecType data.RecT
 			LogChannel <- LogStruct{"ERROR", err}
 		}
 	} else if RecType.Record_type == "01" || RecType.Record_type == "02" {
-		sid, err := camel.AuthorizeVoice_req(rec.Msisdn, rec.IMSI, RecType.Record_type, dst)
+		sid, err := camel.AuthorizeVoice_req(rec.Msisdn, rec.IMSI, RecType.Record_type, dst, lc)
 
 		if err == nil {
 			CamelOfflineCDR.Store(string(sid), data.TypeBrtOfflineCdr{RecPool: rec,
 				CDRtime:   time.Now(),
 				Ratio:     RecType,
 				TaskName:  NameTask,
-				DstMsisdn: dst})
+				DstMsisdn: dst,
+				Lac:       lc.LAC,
+				Cell:      lc.CELL})
 			CamelChannel <- camel
 			CDRPerSec.Inc(NameTask)
 			CDRPerSecCamel.Inc(NameTask)
@@ -1150,7 +1165,7 @@ func CreateCamelMessage(rec data.RecTypePool, NameTask string, RecType data.RecT
 		}
 	} else {
 		// Если не прописаны типы сформировать оффлайн
-		rr, err := data.CreateCDRRecord(rec, time.Now(), RecType, CDRPatternTask[NameTask], dst)
+		rr, err := data.CreateCDRRecord(rec, time.Now(), RecType, CDRPatternTask[NameTask], dst, lc)
 		if err != nil {
 			LogChannel <- LogStruct{"ERROR", err}
 		} else {

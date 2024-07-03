@@ -28,6 +28,9 @@ type CommonType struct {
 		Port         int    `json:"Port"`
 		SMSCAddress  string `json:"SMSCAddress"`
 		Camel_SCP_id string `json:"Camel_SCP_id"`
+		XVLR         string `json:"XVLR"`
+		ContryCode   string `json:"ContryCode"`
+		OperatorCode string `json:"OperatorCode"`
 	} `json:"CAMEL"`
 	Report struct {
 		Influx       bool   `json:"Influx"`
@@ -67,8 +70,14 @@ type TasksType struct {
 	// Шаблон сохранения файла
 	Template_save_file string `json:"template_save_file"`
 	// Паттерн для для СДР
-	CDR_pattern     string `json:"cdr_pattern"`
+	CDR_pattern string `json:"cdr_pattern"`
+	// Вызываемый абонент по умолчанию
 	DefaultMSISDN_B string `json:"DefaultMSISDN_B"`
+	// LAC,CELL по умолчанию
+	DefaultLAC  int `json:"DefaultLAC"`
+	DefaultCELL int `json:"DefaultCELL"`
+	// Пул с перечнем LAC/CELL
+	DatapoolCsvLac string `json:"datapool_csv_lac"`
 }
 
 // Тип структуры описания логического вызова, сервис кодов
@@ -95,6 +104,12 @@ type RecTypePool struct {
 
 type PoolSubs []RecTypePool
 
+// Структура строки пула
+type RecTypeLACPool struct {
+	LAC  int
+	CELL int
+}
+
 // Сткуртура для массива пост обработки
 type TypeBrtOfflineCdr struct {
 	RecPool  RecTypePool
@@ -104,7 +119,8 @@ type TypeBrtOfflineCdr struct {
 	// для кемел
 	DstMsisdn string
 	// duration
-	// lac cell
+	Lac  int
+	Cell int
 }
 
 // Пишем логи через горутину
@@ -165,7 +181,7 @@ func (p PoolSubs) CreatePoolList(data [][]string, Task TasksType) PoolSubs {
 }
 
 func (p PoolSubs) ReinitializationPoolList(Task TasksType) {
-	for i, _ := range p {
+	for i := 0; i < len(p); i++ {
 		p[i].CallsCount = Task.GenCallCount()
 	}
 }
@@ -206,7 +222,7 @@ func FloatToString(input_num float64) string {
 // Формирование записи для CDR
 // Формируется из шаблона с заменой
 // Переменная DstMsisdn если не задана, то используется значение по умолчанию
-func CreateCDRRecord(RecordMsisdn RecTypePool, date time.Time, RecordType RecTypeRatioType, cfg CDRPatternType, DstMsisdn string) (string, error) {
+func CreateCDRRecord(RecordMsisdn RecTypePool, date time.Time, RecordType RecTypeRatioType, cfg CDRPatternType, DstMsisdn string, lc RecTypeLACPool) (string, error) {
 	// Номер записи, добавить генерацию
 	rec_number := time.Now().Format("0201030405")
 	//TasksType.CDR_pattern
@@ -224,7 +240,8 @@ func CreateCDRRecord(RecordMsisdn RecTypePool, date time.Time, RecordType RecTyp
 	} else {
 		CDR_pattern = strings.Replace(CDR_pattern, "{msisdnB}", cfg.MsisdnB, 1)
 	}
-
+	CDR_pattern = strings.Replace(CDR_pattern, "{lac_a}", strconv.Itoa(lc.CELL), 1)
+	CDR_pattern = strings.Replace(CDR_pattern, "{call_a}", strconv.Itoa(lc.LAC), 1)
 	return CDR_pattern, nil
 }
 

@@ -31,6 +31,9 @@ type Config struct {
 	Duration         int
 	Camel_SCP_id     uint8
 	Camel_SMSAddress string
+	XVLR             string
+	ContryCode       string
+	OperatorCode     string
 	ResponseFunc     HandOK
 	RequestFunc      HandReq
 	//Каналы

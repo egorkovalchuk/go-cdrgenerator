@@ -40,6 +40,7 @@ func ServerStart(cfgg *Config, ll *ListListener, debugm bool) {
 	LogChannel <- LogStruct{"INFO", "Starting CAMEL SCP"}
 	list_listener = ll
 	cfg = cfgg
+	InitMSC()
 	// Устанавливаем прослушивание порта
 
 	ln, err := net.Listen("tcp", ":"+strconv.Itoa(cfg.Camel_port))

@@ -6,6 +6,8 @@ import (
 	"math/rand"
 	"strconv"
 	"time"
+
+	"github.com/egorkovalchuk/go-cdrgenerator/data"
 )
 
 const (
@@ -22,6 +24,10 @@ const (
 	// параметры
 	TagSize         = 2
 	LengthSizeParam = 2
+)
+
+var (
+	LocationMSCbase []byte
 )
 
 // Описание пареметров в пакете, Optional - является ли данный параметр обязательным
@@ -272,7 +278,7 @@ func (p *Camel_tcp) LenghtTCP() (uint16, error) {
 	return uint16(tmp), nil
 }
 
-func (p *Camel_tcp) AuthorizeSMS_req(msisdn string, imsi string, ServiceCode string, msisdnB string) ([]byte, error) {
+func (p *Camel_tcp) AuthorizeSMS_req(msisdn string, imsi string, ServiceCode string, msisdnB string, lc data.RecTypeLACPool) ([]byte, error) {
 	var err error
 	p.Sequence = Sec + uint32(1)
 	p.Type = TYPE_AUTHORIZESMS_REQ
@@ -333,8 +339,8 @@ func (p *Camel_tcp) AuthorizeSMS_req(msisdn string, imsi string, ServiceCode str
 	//LocationInformationMSC
 	tmp = NewCamelTCPParam()
 	tmp.Tag = camel_params_map[0x0019].Tag
-	//tmp.Param = []byte{48, 29, 129, 7, 145, 135, 33, 105, 0, 8, 243, 163, 9, 128, 7, 82, 240, 32, 23, 218, 15, 241, 134, 7, 145, 135, 33, 105, 0, 8, 242}
-	tmp.Param = []byte{0xbf, 0x34, 0x0b, 0xa3, 0x09, 0x80, 0x07, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00}
+	tmp.Param = LocationMSC(lc)
+	//tmp.Param = []byte{0xbf, 0x34, 0x0b, 0xa3, 0x09, 0x80, 0x07, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00}
 	tmp.LengthParams = uint16(len(tmp.Param))
 	tmp.Type = camel_params_map[tmp.Tag].Type
 	p.Frame[tmp.Tag] = tmp
@@ -435,7 +441,7 @@ func (p *Camel_tcp) EndSMS_req(sid []byte) error {
 }
 
 // Авторизация Звонка
-func (p *Camel_tcp) AuthorizeVoice_req(msisdn string, imsi string, ServiceCode string, msisdnB string) ([]byte, error) {
+func (p *Camel_tcp) AuthorizeVoice_req(msisdn string, imsi string, ServiceCode string, msisdnB string, lc data.RecTypeLACPool) ([]byte, error) {
 	var err error
 
 	p.Sequence = Sec + uint32(1)
@@ -564,8 +570,8 @@ func (p *Camel_tcp) AuthorizeVoice_req(msisdn string, imsi string, ServiceCode s
 	// Данные должны быть представлены в ASN.1 формате (Sequence представление из InitialDP) без распаковки со стороны SCP
 	tmp = NewCamelTCPParam()
 	tmp.Tag = camel_params_map[0x0018].Tag
-	//tmp.Param = []byte{48, 29, 129, 7, 145, 135, 33, 105, 0, 8, 243, 163, 9, 128, 7, 82, 240, 32, 23, 218, 15, 241, 134, 7, 145, 135, 33, 105, 0, 8, 242}
-	tmp.Param = []byte{0xbf, 0x34, 0x0b, 0xa3, 0x09, 0x80, 0x07, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00}
+	tmp.Param = LocationMSC(lc)
+	//tmp.Param = []byte{0xbf, 0x34, 0x0b, 0xa3, 0x09, 0x80, 0x07, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00}
 	tmp.LengthParams = uint16(len(tmp.Param))
 	tmp.Type = camel_params_map[tmp.Tag].Type
 	p.Frame[tmp.Tag] = tmp
@@ -703,30 +709,33 @@ func Stringtobytereverse(t string) []byte {
 	var err error
 	ln, parity := divmod(len(t), 2)
 	tmp = make([]byte, ln+parity)
-	//var mscgt_rune string
+
 	var bit_right, bit_left int
-	for i := 0; i < ln; i++ {
+	for i := 0; i <= ln; i++ {
 		if i < ln {
 			bit_left, err = strconv.Atoi(string(t[i*2]))
 			bit_right, err = strconv.Atoi(string(t[i*2+1]))
 			if err != nil {
-				LogChannel <- LogStruct{"ERROR: NewSessionId", err}
+				LogChannel <- LogStruct{"ERROR: Stringtobytereverse", err}
 			}
+			bit_right = bit_right << 4
+			tt := bit_left + bit_right
+			tmp[i] = byte(tt)
 		} else {
 			if parity != 0 && i == ln {
 				bit_left, err = strconv.Atoi(string(t[i*2]))
 				if err != nil {
-					LogChannel <- LogStruct{"ERROR: NewSessionId", err}
+					LogChannel <- LogStruct{"ERROR: Stringtobytereverse", err}
 				}
+				bit_right = 15
+				bit_right = bit_right << 4
+				tt := bit_left + bit_right
+				tmp[i] = byte(tt)
 			} else {
 				bit_left = 15
 			}
 			bit_right = 15
 		}
-
-		bit_right = bit_right << 4
-		tt := bit_left + bit_right
-		tmp[i] = byte(tt)
 	}
 	return tmp
 }
@@ -770,4 +779,52 @@ func divmod(numerator, denominator int) (quotient, remainder int) {
 	quotient = numerator / denominator
 	remainder = numerator % denominator
 	return
+}
+
+// Location MSC
+func LocationMSC(lc data.RecTypeLACPool) []byte {
+
+	// Генерация Location MSC
+	buffer := LocationMSCbase
+
+	tmp := binary.BigEndian.AppendUint16([]byte{}, uint16(lc.LAC))
+	buffer = append(buffer, tmp...)
+	tmp = binary.BigEndian.AppendUint16([]byte{}, uint16(lc.CELL))
+	buffer = append(buffer, tmp...)
+
+	buffer[1] = byte(len(buffer) - 2)
+
+	return buffer
+}
+
+func InitMSC() {
+
+	// Инициализация
+	// Определяем не меняющаяся часть LocationMSC
+	LocationMSCbase = append(LocationMSCbase, 0xa5) //Context, Constructed, 0x05
+	LocationMSCbase = append(LocationMSCbase, 0x00) //Длина, заменим в конце
+
+	// Дочерние
+	// xVLR
+	LocationMSCbase = append(LocationMSCbase, 0x81) //Context, Primitive, 0x01
+	LocationMSCbase = append(LocationMSCbase, 0x07) //Длина
+	//VLR Number
+	//1... .... = extension: noExtersion (0x01)
+	//.001 .... = natureOfAddressIndicator: International (0x01)
+	//.... 0001 = numberingPlanIndicator: ISDN(Telephony)NumberingPlan (0x01)
+	//ISDNString:79 28 99 00 09 1
+	tmp := Stringtobytereverse(cfg.XVLR)
+	LocationMSCbase = append(LocationMSCbase, 0x91) //Тип xVLR и его идентификатор
+	LocationMSCbase = append(LocationMSCbase, tmp...)
+
+	//CellIDorLAI
+	LocationMSCbase = append(LocationMSCbase, 0xa3) //Context, Constructed, 0x03
+	LocationMSCbase = append(LocationMSCbase, 0x09) //Длина
+	LocationMSCbase = append(LocationMSCbase, 0x80) //Context, Primitive, 0x001
+	LocationMSCbase = append(LocationMSCbase, 0x07) //Длина
+
+	tmp = Stringtobytereverse(cfg.ContryCode)
+	LocationMSCbase = append(LocationMSCbase, tmp...)
+	tmp = Stringtobytereverse(cfg.OperatorCode)
+	LocationMSCbase = append(LocationMSCbase, tmp...)
 }

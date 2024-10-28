@@ -17,8 +17,7 @@ func StartWriteInflux(cfg CommonType, f func(logtext interface{}), InputString c
 		case <-heartbeat:
 			f("OK")
 
-		default:
-			str := <-InputString
+		case str := <-InputString:
 			request := cfg.Report.InfluxServer
 
 			resp, err := http.NewRequest("POST", request, nil)
@@ -45,7 +44,7 @@ func StartWriteInflux(cfg CommonType, f func(logtext interface{}), InputString c
 			}
 
 			defer cli.CloseIdleConnections()
-
+		default:
 		}
 	}
 }

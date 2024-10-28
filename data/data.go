@@ -163,6 +163,8 @@ func HelpStart() {
 	fmt.Println("Use -brtlist task list (local,roam)")
 	fmt.Println("Use -camel for UP SCP Server(Camel protocol)")
 	fmt.Println("Use -rm Delete all files in directories(Test optional)")
+	fmt.Println("Debug option")
+	fmt.Println("Use -slow_camel for send Camel message every 10 seconds")
 }
 
 // Заполнение массива для последующей генерации нагрузки

@@ -46,3 +46,5 @@ Added re-reading of the pool
 ## Vesion 0.4.5
 ### new fearure
 Added Location MSC generate, use pool CELL and LAC area
+### Fix Bug
+Fix connection termination

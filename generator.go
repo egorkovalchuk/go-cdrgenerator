@@ -97,7 +97,8 @@ var (
 	CamelOfflineCDR      = data.NewCDROffline()
 
 	// Канал записи в Camel
-	CamelChannel = make(chan tlv.Camel_tcp, 2000)
+	CamelChannel  = make(chan tlv.Camel_tcp, 2000)
+	list_listener *tlv.ListListener
 
 	// Канал записи статистики в БД
 	ReportStat = make(chan string, 1000)
@@ -109,8 +110,8 @@ var (
 	// Маркер завершения горутин генерации нагрузки
 	st = false
 	// Тестовый параметр замедления
-	slow  bool // Равномерная запись
-	slow1 bool // Запись раз в 10 секунд - можно удали что бы не съедать машинное время
+	slow       bool // Равномерная запись
+	slow_camel bool // Запись раз в 10 секунд - можно удали что бы не съедать машинное время
 
 	// Удаление файлов после работы демона
 	// Тестовая опция для удобства
@@ -158,7 +159,7 @@ func main() {
 	// --for Linux compile
 	// замедление и тесты
 	flag.BoolVar(&slow, "slow", false, "Start with slow mode")
-	flag.BoolVar(&slow1, "slow1", false, "Start with slow1 mode")
+	flag.BoolVar(&slow_camel, "slow_camel", false, "Start with slow_camel mode")
 	flag.Parse()
 
 	// Открытие лог файла
@@ -871,6 +872,12 @@ func StartTaskCamel(PoolList data.PoolSubs, cfg data.TasksType, FirstStart bool)
 			if st {
 				return
 			}
+			// пропуск шага если нет активных соединений
+			if camel && len(list_listener.List) == 0 {
+				ProcessInfo("Waiting to connect Camel client")
+				continue
+			}
+
 			CDR = CDRPerSec.Load(cfg.Name)
 			if CDR < cfg.CallsPerSecond {
 				// Сброс счетчика
@@ -894,7 +901,7 @@ func StartTaskCamel(PoolList data.PoolSubs, cfg data.TasksType, FirstStart bool)
 
 					switch {
 					case cfg.RecTypeRatio[RecTypeIndex].DefaultChan == "camel":
-						if slow1 {
+						if slow_camel {
 							time.Sleep(time.Duration(10) * time.Second)
 						}
 						CreateCamelMessage(PoolList[PoolIndex], cfg.Name, cfg.RecTypeRatio[RecTypeIndex])
@@ -939,15 +946,15 @@ func StartCamelServer() {
 		CamelChannel:     CamelChannel,
 	}
 
-	tmp := tlv.NewListListener()
+	list_listener = tlv.NewListListener()
 
-	go tlv.ServerStart(camel_cfg, tmp, debugm)
+	go tlv.ServerStart(camel_cfg, list_listener, debugm)
 
 	// Ждем открытие хотя бы одного соединения
 	// Потоки дочерних поднимаются листенером
 	for {
 		time.Sleep(time.Duration(5) * time.Second)
-		if len(tmp.List) > 0 {
+		if len(list_listener.List) > 0 {
 			break
 		}
 		ProcessInfo("Wait connet to SCP Server")

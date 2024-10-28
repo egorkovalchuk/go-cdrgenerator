@@ -132,7 +132,10 @@
           ],
           "template_save_file" : "roam_{date}.csv",
           "cdr_pattern": "{rec_type},{rec_number},,,{imsi},{msisdn},{msisdnB},{datetime},126,,05,,,352022064861160,,{type_ser},{type_code},,,135,,,,,,,9959987025,,05,008DB619,,,,GEOMA,+0300,,,995322170000,0,0,0,,,,,,,,RC0003963113.xml,,,,0,0,0,0,1510065489088647,0,1",
-          "DefaultMSISDN_B": "9959987025"
+          "DefaultMSISDN_B": "9959987025",
+          "DefaultLAC": 135,
+          "DefaultCELL": 0,
+          "datapool_csv_lac":""
        }
     ]
  }

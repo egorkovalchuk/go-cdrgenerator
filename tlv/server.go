@@ -1,6 +1,7 @@
 package tlv
 
 import (
+	"errors"
 	"io"
 	"log"
 	"net"
@@ -122,6 +123,14 @@ func CamelHandler1(conn *Listener) {
 			LogChannel <- LogStruct{"INFO", conn.RemoteAddr().String() + ": connection close"}
 			return
 		default:
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				list_listener.DeleteCloseConn(conn.Server)
+				conn.Close()
+				LogChannel <- LogStruct{"INFO", conn.RemoteAddr().String() + ": connection close(ErrDeadlineExceeded)"}
+				return
+			}
+			//errors.Is(err, os.ErrDeadlineExceeded)
+			//if err, ok := err.(net.Error); ok && err.Timeout()
 			//read tcp 127.0.0.1:4868->127.0.0.1:64556: i/o timeout
 		}
 
@@ -190,7 +199,19 @@ func CamelHandler(conn *Listener) {
 				conn.Close()
 				LogChannel <- LogStruct{"INFO", conn.RemoteAddr().String() + ": connection close"}
 				return
+			case os.ErrDeadlineExceeded:
+				list_listener.DeleteCloseConn(conn.Server)
+				conn.Close()
+				LogChannel <- LogStruct{"INFO", conn.RemoteAddr().String() + ": connection close(ErrDeadlineExceeded1)"}
+				return
 			default:
+				if errors.Is(err, os.ErrDeadlineExceeded) {
+					list_listener.DeleteCloseConn(conn.Server)
+					conn.Close()
+					LogChannel <- LogStruct{"INFO", conn.RemoteAddr().String() + ": connection close(ErrDeadlineExceeded)"}
+					return
+				}
+				// Сделфать закрытие коннекта  горутины
 				//read tcp 127.0.0.1:4868->127.0.0.1:64556: i/o timeout
 			}
 		}

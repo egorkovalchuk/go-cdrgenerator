@@ -33,11 +33,13 @@ type CommonType struct {
 		OperatorCode string `json:"OperatorCode"`
 	} `json:"CAMEL"`
 	Report struct {
-		Influx       bool   `json:"Influx"`
-		LoginInflux  string `json:"LoginInflux"`
-		PassInflux   string `json:"PassInflux"`
-		InfluxServer string `json:"InfluxServer"`
-		Region       string `json:"Region"`
+		Influx        bool   `json:"Influx"`
+		InfluxToken   string `json:"InfluxToken"`
+		InfluxOrg     string `json:"InfluxOrg"`
+		InfluxVersion int    `json:"InfluxVersion"`
+		InfluxBucket  string `json:"InfluxBucket"`
+		InfluxServer  string `json:"InfluxServer"`
+		Region        string `json:"Region"`
 	} `json:"Report"`
 	DateRange struct {
 		Start string `json:"start"`

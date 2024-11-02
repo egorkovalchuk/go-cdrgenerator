@@ -32,7 +32,7 @@ import (
 const (
 	logFileName = "generator.log"
 	pidFileName = "generator.pid"
-	versionutil = "0.4.5"
+	versionutil = "0.4.6"
 )
 
 var (
@@ -873,8 +873,10 @@ func StartTaskCamel(PoolList data.PoolSubs, cfg data.TasksType, FirstStart bool)
 				return
 			}
 			// пропуск шага если нет активных соединений
+			// пропустить только для камел?
 			if camel && len(list_listener.List) == 0 {
 				ProcessInfo("Waiting to connect Camel client")
+				time.Sleep(time.Duration(5) * time.Second)
 				continue
 			}
 

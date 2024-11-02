@@ -25,10 +25,12 @@
        },
        "Report" :{
             "Influx": true,
-            "LoginInflux" :   "",
-            "PassInflux" :    "",
-            "InfluxServer" :   ""
-            "Region": ""
+            "InfluxToken" :   "",
+            "InfluxOrg" :     "",
+            "InfluxVersion": 1,
+            "InfluxBucket":    "bucket",
+            "InfluxServer" :   "http://127.0.0.1:8086",
+            "Region" : "MSK" 
        }
     },
     "tasks":[

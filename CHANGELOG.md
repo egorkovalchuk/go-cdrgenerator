@@ -49,6 +49,10 @@ Added Location MSC generate, use pool CELL and LAC area
 ### Fix Bug
 Fix connection termination
 ## Vesion 0.4.6
-Add UDP proto for InfluxDBv1
+### new fearure
+Added UDP proto for InfluxDBv1
 ### Fix Bug
 Fix connection to InfluxDBv2
+## Vesion 0.5.0
+### new fearure
+Added  CELL and LAC area pool creation  

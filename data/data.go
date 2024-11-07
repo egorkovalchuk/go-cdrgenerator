@@ -155,6 +155,15 @@ func (cfg *Config) ReadConf(confname string) {
 
 }
 
+func (cfg *Config) ReadTask(task_name string) TasksType {
+	for _, dt := range cfg.Tasks {
+		if dt.Name == task_name {
+			return dt
+		}
+	}
+	return TasksType{}
+}
+
 // Вызов справки
 func HelpStart() {
 	fmt.Println("Use -d start deamon mode")

@@ -33,5 +33,5 @@ Use -camel for UP SCP Server(Camel protocol)
 # Test parameters
 Use -rm Delete all files in directories(Test optional)
 
-Use -slow1 to send 1 message every 10 seconds
+Use -slow_camel to send 1 message every 10 seconds
 

@@ -1,11 +1,10 @@
 *.log
 *.csv
 *.py
-data/222
-data/111
+*.json
 txt
 notes.txt
 .vscode/*
 .vscode
-config.json
+
 asn/corebrt.cpp

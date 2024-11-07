@@ -38,22 +38,16 @@ const (
 var (
 	// конфиг
 	global_cfg data.Config
-
 	// режим работы сервиса(дебаг мод)
 	debugm bool
-
 	// ошибки
 	err error
-
 	// режим работы сервиса
 	startdaemon bool
-
 	// запрос версии
 	version bool
-
 	// Запись в фаил
 	tofile bool
-
 	// для выбора типа соединения
 	brt     bool
 	camel   bool
@@ -117,9 +111,13 @@ var (
 	// Тестовая опция для удобства
 	rm bool
 	// Разрешить запускать дочернии процессы
-	thread bool
+	thread_secodary bool
+	// Запуск утилиты генерации пула LAC/CELL
+	pool             bool
+	connetion_string string
+	pool_task        string
 
-	//тетс
+	// тест
 	ctx    context.Context
 	cancel context.CancelFunc
 )
@@ -152,7 +150,7 @@ func main() {
 	flag.BoolVar(&camel, "camel", false, "SCP(Camel) Server for BRT (Camel protocol)")
 	flag.Var(&brtlist, "brtlist", "List of name task to work BRT")
 	flag.BoolVar(&rm, "rm", false, "Delete files")
-	flag.BoolVar(&thread, "thread", false, "Enable start new threads")
+	flag.BoolVar(&thread_secodary, "thread", false, "Enable start new threads")
 	// for Linux compile
 	// Для использования передачи системных сигналов
 	stdaemon := flag.Bool("s", false, "a bool") // для передачи
@@ -160,7 +158,16 @@ func main() {
 	// замедление и тесты
 	flag.BoolVar(&slow, "slow", false, "Start with slow mode")
 	flag.BoolVar(&slow_camel, "slow_camel", false, "Start with slow_camel mode")
+	// Утилиты
+	flag.BoolVar(&pool, "pool", false, "Starting pool creation LAC/CELL, use -t task name -p password")
+	flag.StringVar(&pool_task, "t", "", "Task Name")
+	flag.StringVar(&connetion_string, "p", "", "Password")
 	flag.Parse()
+
+	if pool {
+		CreatePool()
+		return
+	}
 
 	// Открытие лог файла
 	// ротация не поддерживается в текущей версии
@@ -396,7 +403,7 @@ func StartTaskFile(PoolList data.PoolSubs, cfg data.TasksType, FirstStart bool) 
 	for {
 		// Порождать доп процессы может только первый процесс
 		// Уменьшает обращение с блокировками переменной флаг
-		if FirstStart && thread {
+		if FirstStart && thread_secodary {
 			if Flag.Load(cfg.Name) == 1 {
 				ProcessInfo("Start new thead " + cfg.Name)
 				go StartTaskFile(PoolList, cfg, false)
@@ -523,7 +530,7 @@ func StartTaskDiam(PoolList data.PoolSubs, cfg data.TasksType, FirstStart bool) 
 			// при БРТ не стартует поток ВРЕМЕННО!!!
 			// Поток подключение по диаметру 1, боль 10к/с разогнать
 			// по одному подключению не получается
-			if FirstStart && thread {
+			if FirstStart && thread_secodary {
 				if Flag.Load(cfg.Name) == 1 {
 					ProcessInfo("Start new thead " + cfg.Name)
 					go StartTaskDiam(PoolList, cfg, false)
@@ -861,7 +868,7 @@ func StartTaskCamel(PoolList data.PoolSubs, cfg data.TasksType, FirstStart bool)
 
 			// Порождать доп процессы может только первый процесс
 			// Уменьшает обращение с блокировками переменной флаг
-			if FirstStart && thread {
+			if FirstStart && thread_secodary {
 				if Flag.Load(cfg.Name) == 1 {
 					ProcessInfo("Start new thead " + cfg.Name)
 					go StartTaskCamel(PoolList, cfg, false)
@@ -1199,7 +1206,26 @@ func StartClient() {
 		// Запуск потока Camel
 		// Горутина запускается из функции, по количеству серверов и потоков
 		StartCamelServer()
+
 	}
+}
+
+func CreatePool() {
+	// Проверка на доп параметры
+	if pool_task == "" {
+		fmt.Println("Stop utils. Task name is empty. Use -t")
+		return
+	}
+	if connetion_string == "" {
+		fmt.Println("Stop utils. Password is empty. Use -p")
+		return
+	}
+	// Чтение конфига
+	global_cfg.ReadConf("config.json")
+
+	tsk := global_cfg.ReadTask(pool_task)
+
+	data.CreatePoolCELL(tsk.DatapoolCsvLac, "utilconfig.json", pool_task, connetion_string)
 }
 
 func init() {

@@ -9,5 +9,6 @@ require (
 
 require (
 	github.com/ishidawataru/sctp v0.0.0-20210707070123-9a39160e9062 // indirect
+	github.com/sijms/go-ora/v2 v2.8.22 // indirect
 	golang.org/x/net v0.22.0 // indirect
 )

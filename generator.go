@@ -32,7 +32,7 @@ import (
 const (
 	logFileName = "generator.log"
 	pidFileName = "generator.pid"
-	versionutil = "0.4.6"
+	versionutil = "0.5.0"
 )
 
 var (
@@ -112,10 +112,6 @@ var (
 	rm bool
 	// Разрешить запускать дочернии процессы
 	thread_secodary bool
-	// Запуск утилиты генерации пула LAC/CELL
-	pool             bool
-	connetion_string string
-	pool_task        string
 
 	// тест
 	ctx    context.Context
@@ -158,16 +154,7 @@ func main() {
 	// замедление и тесты
 	flag.BoolVar(&slow, "slow", false, "Start with slow mode")
 	flag.BoolVar(&slow_camel, "slow_camel", false, "Start with slow_camel mode")
-	// Утилиты
-	flag.BoolVar(&pool, "pool", false, "Starting pool creation LAC/CELL, use -t task name -p password")
-	flag.StringVar(&pool_task, "t", "", "Task Name")
-	flag.StringVar(&connetion_string, "p", "", "Password")
 	flag.Parse()
-
-	if pool {
-		CreatePool()
-		return
-	}
 
 	// Открытие лог файла
 	// ротация не поддерживается в текущей версии
@@ -187,7 +174,7 @@ func main() {
 	ProcessDebug("Start with debug mode")
 
 	if startdaemon {
-		LogChannel <- LogStruct{"INFO", "Start daemon mode"}
+		ProcessInfo("Start daemon mode")
 		fmt.Println("Start util in daemon mode")
 	}
 
@@ -211,7 +198,7 @@ func main() {
 	go Monitor()
 	// Запуск статистики
 	// как переопределить монитор?
-	if global_cfg.Common.Report.Influx == true {
+	if global_cfg.Common.Report.Influx {
 		go data.StartWriteInflux(global_cfg.Common, ProcessInflux, ReportStat)
 	}
 
@@ -434,7 +421,7 @@ func StartTaskFile(PoolList data.PoolSubs, cfg data.TasksType, FirstStart bool) 
 				lc := LACCELLpool[cfg.Name][rand.Intn(LACCELLlen[cfg.Name])]
 				rr, err := data.CreateCDRRecord(PoolList[PoolIndex], time.Now(), cfg.RecTypeRatio[RecTypeIndex], CDRPatternTask[cfg.Name], data.RandomMSISDN(cfg.Name), lc)
 				if err != nil {
-					LogChannel <- LogStruct{"ERROR", err}
+					ProcessError(err)
 				} else {
 					CDRChanneltoFileUni[cfg.Name] <- rr
 				}
@@ -454,13 +441,12 @@ func StartTaskFile(PoolList data.PoolSubs, cfg data.TasksType, FirstStart bool) 
 func StartFileCDR(task data.TasksType, InputString chan string) {
 	// Запись в разные каталоги
 	var DirNum int
-	var DirNumLen int
-	DirNumLen = len(task.PathsToSave)
+	DirNumLen := len(task.PathsToSave)
 
 	f, err := os.Create(strings.Replace(task.PathsToSave[0]+task.Template_save_file, "{date}", time.Now().Format("20060201030405"), 1))
 
 	if err != nil {
-		LogChannel <- LogStruct{"ERROR", err}
+		ProcessError(err)
 	}
 
 	ProcessDebug("Start write " + f.Name())
@@ -479,7 +465,7 @@ func StartFileCDR(task data.TasksType, InputString chan string) {
 			f, err = os.Create(strings.Replace(task.PathsToSave[DirNum]+task.Template_save_file, "{date}", time.Now().Format("20060201030405"), 1))
 
 			if err != nil {
-				LogChannel <- LogStruct{"ERROR", err}
+				ProcessError(err)
 			}
 
 			// Переместить в горутину
@@ -501,7 +487,7 @@ func StartFileCDR(task data.TasksType, InputString chan string) {
 			_, err = f.WriteString(str + "\n")
 
 			if err != nil {
-				LogChannel <- LogStruct{"ERROR", err}
+				ProcessError(err)
 			}
 		}
 	}
@@ -662,29 +648,26 @@ func Dial(cli *sm.Client, addr, cert, key string, ssl bool, networkType string) 
 
 // Тест горутина обработки ответов диаметра
 func DiamAnswer(f chan diam.Message) {
-	for {
-		select {
-		case m := <-f:
-			s, sid := data.ResponseDiamHandler(&m, ProcessDiam, debugm)
-			CDRDiamResponseCount.Inc(strconv.Itoa(s))
-			if s == 4011 || s == 4522 || s == 4012 {
-				//logdiam.Println("DIAM: Answer CCA code: " + strconv.Itoa(s) + " Session: " + sid)
-				//переход в оффлайн
-				val := BrtOfflineCDR.Load(sid) //BrtOfflineCDR[sid]*
-				rr, err := data.CreateCDRRecord(val.RecPool, val.CDRtime, val.Ratio, CDRPatternTask[val.TaskName], val.DstMsisdn, data.RecTypeLACPool{LAC: val.Lac, CELL: val.Cell})
-				if err != nil {
-					LogChannel <- LogStruct{"ERROR", err}
-				} else {
-					CDRChanneltoFileUni[val.TaskName] <- rr
-				}
-				BrtOfflineCDR.Delete(sid)
-			} else if s == 5030 {
-				// 5030 пользователь не известен
-				BrtOfflineCDR.Delete(sid)
+	for m := range f {
+		s, sid := data.ResponseDiamHandler(&m, ProcessDiam, debugm)
+		CDRDiamResponseCount.Inc(strconv.Itoa(s))
+		if s == 4011 || s == 4522 || s == 4012 {
+			//logdiam.Println("DIAM: Answer CCA code: " + strconv.Itoa(s) + " Session: " + sid)
+			//переход в оффлайн
+			val := BrtOfflineCDR.Load(sid) //BrtOfflineCDR[sid]*
+			rr, err := data.CreateCDRRecord(val.RecPool, val.CDRtime, val.Ratio, CDRPatternTask[val.TaskName], val.DstMsisdn, data.RecTypeLACPool{LAC: val.Lac, CELL: val.Cell})
+			if err != nil {
+				ProcessError(err)
 			} else {
-				//logdiam.Println("DIAM: Answer CCA code: " + strconv.Itoa(s))
-				BrtOfflineCDR.Delete(sid)
+				CDRChanneltoFileUni[val.TaskName] <- rr
 			}
+			BrtOfflineCDR.Delete(sid)
+		} else if s == 5030 {
+			// 5030 пользователь не известен
+			BrtOfflineCDR.Delete(sid)
+		} else {
+			//logdiam.Println("DIAM: Answer CCA code: " + strconv.Itoa(s))
+			BrtOfflineCDR.Delete(sid)
 		}
 	}
 }
@@ -703,7 +686,7 @@ func AnswerCCAEvent() diam.HandlerFunc {
 			val := BrtOfflineCDR.Load(sid) //BrtOfflineCDR[sid]*
 			rr, err := data.CreateCDRRecord(val.RecPool, val.CDRtime, val.Ratio, CDRPatternTask[val.TaskName], val.DstMsisdn, data.RecTypeLACPool{LAC: val.Lac, CELL: val.Cell})
 			if err != nil {
-				LogChannel <- LogStruct{"ERROR", err}
+				ProcessError(err)
 			} else {
 				CDRChanneltoFileUni[val.TaskName] <- rr
 			}
@@ -741,7 +724,7 @@ func SendCCREvent(c diam.Conn, cfg *sm.Settings, in chan data.DiamCH) {
 	//defer c.Close()
 
 	heartbeat := time.Tick(10 * time.Second)
-	meta, ok := smpeer.FromContext(c.Context())
+	_, ok := smpeer.FromContext(c.Context())
 	if !ok {
 		ProcessDiam("Client connection does not contain metadata")
 		ProcessDiam("Close threads")
@@ -751,7 +734,7 @@ func SendCCREvent(c diam.Conn, cfg *sm.Settings, in chan data.DiamCH) {
 		select {
 		case <-heartbeat:
 			// Сделать выход или переоткрытие?
-			meta, ok = smpeer.FromContext(c.Context())
+			_, ok := smpeer.FromContext(c.Context())
 			if !ok {
 				ProcessDiam("Client connection does not contain metadata")
 				ProcessDiam("Close threads")
@@ -765,11 +748,11 @@ func SendCCREvent(c diam.Conn, cfg *sm.Settings, in chan data.DiamCH) {
 			ProcessDiam(fmt.Sprintf("Sending DWR to %s", c.RemoteAddr()))
 			_, err = m.WriteTo(c)
 			if err != nil {
-				LogChannel <- LogStruct{"ERROR", err}
+				ProcessError(err)
 			}
 
 		case tmp := <-in:
-			meta, ok = smpeer.FromContext(c.Context())
+			meta, ok := smpeer.FromContext(c.Context())
 			if !ok {
 				ProcessDiam("Client connection does not contain metadata")
 				ProcessDiam("Close threads")
@@ -783,7 +766,7 @@ func SendCCREvent(c diam.Conn, cfg *sm.Settings, in chan data.DiamCH) {
 
 			_, err = diam_message.WriteTo(c)
 			if err != nil {
-				LogChannel <- LogStruct{"ERROR", err}
+				ProcessError(err)
 			} else {
 				CDRDiamCount.Inc(server)
 			}
@@ -868,6 +851,7 @@ func StartTaskCamel(PoolList data.PoolSubs, cfg data.TasksType, FirstStart bool)
 
 			// Порождать доп процессы может только первый процесс
 			// Уменьшает обращение с блокировками переменной флаг
+			// Вынести в отдельный поток?
 			if FirstStart && thread_secodary {
 				if Flag.Load(cfg.Name) == 1 {
 					ProcessInfo("Start new thead " + cfg.Name)
@@ -919,7 +903,7 @@ func StartTaskCamel(PoolList data.PoolSubs, cfg data.TasksType, FirstStart bool)
 					default:
 						rr, err := data.CreateCDRRecord(PoolList[PoolIndex], time.Now(), cfg.RecTypeRatio[RecTypeIndex], CDRPatternTask[cfg.Name], data.RandomMSISDN(cfg.Name), LACCELLpool[cfg.Name][rand.Intn(LACCELLlen[cfg.Name])])
 						if err != nil {
-							LogChannel <- LogStruct{"ERROR", err}
+							ProcessError(err)
 						} else {
 							CDRChanneltoFileUni[cfg.Name] <- rr
 							CDRPerSec.Inc(cfg.Name)
@@ -984,14 +968,13 @@ func CamelSend() tlv.HandReq {
 					if err == io.EOF {
 						c.Close()
 						tlv.DeleteCloseConn(c.Server)
-						LogChannel <- LogStruct{"INFO", c.RemoteAddr().String() + ": connection close"}
-						LogChannel <- LogStruct{"INFO", "Close threads"}
+						ProcessInfo(c.RemoteAddr().String() + ": connection close")
+						ProcessInfo("Close threads")
 						return
 					}
 				} else {
 					CDRCamelCount.Inc(c.RemoteAddr().String())
 				}
-			default:
 			}
 		}
 	}
@@ -1009,7 +992,7 @@ func CamelResponse() tlv.HandOK {
 			val := CamelOfflineCDR.Load(sid)
 			rr, err := data.CreateCDRRecord(val.RecPool, val.CDRtime, val.Ratio, CDRPatternTask[val.TaskName], val.DstMsisdn, data.RecTypeLACPool{LAC: val.Lac, CELL: val.Cell})
 			if err != nil {
-				LogChannel <- LogStruct{"ERROR", err}
+				ProcessError(err)
 			} else {
 				CDRChanneltoFileUni[val.TaskName] <- rr
 			}
@@ -1021,7 +1004,7 @@ func CamelResponse() tlv.HandOK {
 				val := CamelOfflineCDR.Load(sid)
 				rr, err := data.CreateCDRRecord(val.RecPool, val.CDRtime, val.Ratio, CDRPatternTask[val.TaskName], val.DstMsisdn, data.RecTypeLACPool{LAC: val.Lac, CELL: val.Cell})
 				if err != nil {
-					LogChannel <- LogStruct{"ERROR", err}
+					ProcessError(err)
 				} else {
 					CDRChanneltoFileUni[val.TaskName] <- rr
 				}
@@ -1030,15 +1013,19 @@ func CamelResponse() tlv.HandOK {
 			} else {
 				camel_req := tlv.NewCamelTCP()
 				err = camel_req.EndSMS_req(camel.Frame[0x002C].Param)
+				if err != nil {
+					ProcessError(err)
+				}
 				tmprw, err = camel_req.Encoder()
 				if err != nil {
+					ProcessError(err)
 				}
 				if _, err = c.WriteTo(tmprw); err != nil {
 					ProcessError(err)
 					if err == io.EOF {
 						c.Close()
 						tlv.DeleteCloseConn(c.Server)
-						LogChannel <- LogStruct{"INFO", c.RemoteAddr().String() + ": connection close"}
+						ProcessInfo(c.RemoteAddr().String() + ": connection close")
 						return
 					}
 				}
@@ -1055,7 +1042,7 @@ func CamelResponse() tlv.HandOK {
 				val := CamelOfflineCDR.Load(sid)
 				rr, err := data.CreateCDRRecord(val.RecPool, val.CDRtime, val.Ratio, CDRPatternTask[val.TaskName], val.DstMsisdn, data.RecTypeLACPool{LAC: val.Lac, CELL: val.Cell})
 				if err != nil {
-					LogChannel <- LogStruct{"ERROR", err}
+					ProcessError(err)
 				} else {
 					CDRChanneltoFileUni[val.TaskName] <- rr
 				}
@@ -1064,15 +1051,19 @@ func CamelResponse() tlv.HandOK {
 			} else {
 				camel_req := tlv.NewCamelTCP()
 				err = camel_req.EndVoice_req(camel.Frame[0x002C].Param)
+				if err != nil {
+					ProcessError(err)
+				}
 				tmprw, err = camel_req.Encoder()
 				if err != nil {
+					ProcessError(err)
 				}
 				if _, err = c.WriteTo(tmprw); err != nil {
 					ProcessError(err)
 					if err == io.EOF {
 						c.Close()
 						tlv.DeleteCloseConn(c.Server)
-						LogChannel <- LogStruct{"INFO", c.RemoteAddr().String() + ": connection close"}
+						ProcessInfo(c.RemoteAddr().String() + ": connection close")
 						return
 					}
 				}
@@ -1088,15 +1079,15 @@ func CamelResponse() tlv.HandOK {
 			val := CamelOfflineCDR.Load(sid)
 			rr, err := data.CreateCDRRecord(val.RecPool, val.CDRtime, val.Ratio, CDRPatternTask[val.TaskName], val.DstMsisdn, data.RecTypeLACPool{LAC: val.Lac, CELL: val.Cell})
 			if err != nil {
-				LogChannel <- LogStruct{"ERROR", err}
+				ProcessError(err)
 			} else {
 				CDRChanneltoFileUni[val.TaskName] <- rr
 			}
 			CamelOfflineCDR.Delete(sid)
 			CDRCamelResponseCount.Inc(fmt.Sprint(int(camel.Frame[0x002C].Param[13])) + " REJECT VOICE")
 		default:
-			LogChannel <- LogStruct{"INFO: Unknow command", camel.Type}
-			LogChannel <- LogStruct{"ERROR: Unknow command", camel}
+			ProcessInfo(fmt.Sprint("Unknow command ", camel.Type))
+			ProcessError(fmt.Sprint("Unknow command ", camel))
 		}
 	}
 }
@@ -1113,11 +1104,11 @@ func CreateDiamMessage(rec data.RecTypePool, NameTask string, RecType data.RecTy
 	lc := LACCELLpool[NameTask][rand.Intn(LACCELLlen[NameTask])]
 	if err != nil {
 		//замьючено так как не везде есть контекст Not use empty ServiceContextId
-		//LogChannel <- LogStruct{"ERROR", err}
+		//ProcessError(err)
 		//Если не смогли сформировать диаметр запрос, шлем оффлайн
 		rr, err_cdr := data.CreateCDRRecord(rec, time.Now(), RecType, CDRPatternTask[NameTask], dst, lc)
 		if err_cdr != nil {
-			LogChannel <- LogStruct{"ERROR", err}
+			ProcessError(err)
 		} else {
 			CDRChanneltoFileUni[NameTask] <- rr
 			CDRPerSec.Inc(NameTask)
@@ -1160,7 +1151,7 @@ func CreateCamelMessage(rec data.RecTypePool, NameTask string, RecType data.RecT
 			CDRPerSec.Inc(NameTask)
 			CDRPerSecCamel.Inc(NameTask)
 		} else {
-			LogChannel <- LogStruct{"ERROR", err}
+			ProcessError(err)
 		}
 	} else if RecType.Record_type == "01" || RecType.Record_type == "02" {
 		sid, err := camel.AuthorizeVoice_req(rec.Msisdn, rec.IMSI, RecType.Record_type, dst, lc)
@@ -1177,13 +1168,13 @@ func CreateCamelMessage(rec data.RecTypePool, NameTask string, RecType data.RecT
 			CDRPerSec.Inc(NameTask)
 			CDRPerSecCamel.Inc(NameTask)
 		} else {
-			LogChannel <- LogStruct{"ERROR", err}
+			ProcessError(err)
 		}
 	} else {
 		// Если не прописаны типы сформировать оффлайн
 		rr, err := data.CreateCDRRecord(rec, time.Now(), RecType, CDRPatternTask[NameTask], dst, lc)
 		if err != nil {
-			LogChannel <- LogStruct{"ERROR", err}
+			ProcessError(err)
 		} else {
 			CDRChanneltoFileUni[NameTask] <- rr
 			CDRPerSec.Inc(NameTask)
@@ -1208,24 +1199,6 @@ func StartClient() {
 		StartCamelServer()
 
 	}
-}
-
-func CreatePool() {
-	// Проверка на доп параметры
-	if pool_task == "" {
-		fmt.Println("Stop utils. Task name is empty. Use -t")
-		return
-	}
-	if connetion_string == "" {
-		fmt.Println("Stop utils. Password is empty. Use -p")
-		return
-	}
-	// Чтение конфига
-	global_cfg.ReadConf("config.json")
-
-	tsk := global_cfg.ReadTask(pool_task)
-
-	data.CreatePoolCELL(tsk.DatapoolCsvLac, "utilconfig.json", pool_task, connetion_string)
 }
 
 func init() {

@@ -21,7 +21,7 @@ type LogStruct struct {
 // Просто запись в лог
 func LogWrite(err error) {
 	if startdaemon {
-		LogChannel <- LogStruct{"ERROR", err}
+		ProcessError(err)
 	} else {
 		fmt.Println(err)
 	}
@@ -104,7 +104,7 @@ func ProcessPanic(logtext interface{}) {
 func InitVariables() {
 	//Если не задан параметр используем дефолтное значение
 	if global_cfg.Common.Duration == 0 {
-		LogChannel <- LogStruct{"INFO", "Script use default duration - 14400 sec"}
+		ProcessInfo("Script use default duration - 14400 sec")
 		global_cfg.Common.Duration = 14400
 	}
 

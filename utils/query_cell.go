@@ -1,12 +1,16 @@
-package data
+//go:build ignore || gen
+// +build ignore gen
+package main
 
 import (
 	"database/sql"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"strings"
 
+	"github.com/egorkovalchuk/go-cdrgenerator/data"
 	_ "github.com/sijms/go-ora/v2"
 )
 
@@ -20,6 +24,46 @@ type TasksUtilType struct {
 	Region        string `json:"Region"`
 	Query         string `json:"Query"`
 	ConnectString string `json:"ConnectString"`
+}
+
+// Запуск утилиты генерации пула LAC/CELL
+var (
+	pool             bool
+	connetion_string string
+	pool_task        string
+)
+
+func main() {
+	// Утилиты
+	flag.BoolVar(&pool, "pool", false, "Starting pool creation LAC/CELL, use -t task name -p password")
+	flag.StringVar(&pool_task, "t", "", "Task Name")
+	flag.StringVar(&connetion_string, "p", "", "Password")
+	flag.Parse()
+
+	if pool {
+		CreatePool()
+		return
+	}
+
+}
+
+func CreatePool() {
+	// Проверка на доп параметры
+	if pool_task == "" {
+		fmt.Println("Stop utils. Task name is empty. Use -t")
+		return
+	}
+	if connetion_string == "" {
+		fmt.Println("Stop utils. Password is empty. Use -p")
+		return
+	}
+	// Чтение конфига
+	var global_cfg data.Config
+	global_cfg.ReadConf("config.json")
+
+	tsk := global_cfg.ReadTask(pool_task)
+
+	CreatePoolCELL(tsk.DatapoolCsvLac, "utilconfig.json", pool_task, connetion_string)
 }
 
 func (cfg *UtilConf) ReadConf(confname string) {

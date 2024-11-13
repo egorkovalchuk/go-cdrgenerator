@@ -32,7 +32,7 @@ import (
 const (
 	logFileName = "generator.log"
 	pidFileName = "generator.pid"
-	versionutil = "0.5.0"
+	versionutil = "0.5.1"
 )
 
 var (

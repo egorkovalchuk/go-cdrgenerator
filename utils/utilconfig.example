@@ -1,0 +1,20 @@
+{
+    "tasks":[
+        {
+           "Name":"local_NY",
+           "Macr_id": 1,
+           "Region" : "NY",
+           "FileName": "lac_cell.csv",
+           "Query":"select * from lac_cell where macr_id = {macr_id} order by dbms_random.value ) where rownum < 10000 ",
+           "ConnectString":"oracle://lac:{password}@dbhost:1521/dbservicename"
+        },
+        {
+           "Name":"local_DE",
+           "Macr_id": 2,
+           "Region" : "DE",
+           "FileName": "lac_cell_1.csv",
+           "Query":"select * from lac_cell where macr_id = {macr_id} order by dbms_random.value ) where rownum < 10000 ",
+           "ConnectString":"oracle://lac:{password}@dbhost:1521/dbservicename"
+        }
+    ]
+}

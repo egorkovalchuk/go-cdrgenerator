@@ -215,8 +215,7 @@ func (p *TasksType) GenCallCount() int {
 
 // Возвращение типа звонка по рандому
 func RandomRecType(RecType []RecTypeRatioType, c int) int {
-	var RecTypeCount int
-	RecTypeCount = len(RecType)
+	RecTypeCount := len(RecType)
 
 	for i := 0; i < RecTypeCount; i++ {
 		if RecType[i].RangeMin < c && RecType[i].RangeMax > c {
@@ -407,7 +406,7 @@ func (c *RecTypeCounters) Inc(key1 string, key2 string) {
 
 func (c *RecTypeCounters) LoadString(key1 string, key2 string) string {
 	c.mx.Lock()
-	val := c.m[key1][key2]
+	val, _ := c.m[key1][key2]
 	c.mx.Unlock()
 	return strconv.Itoa(val)
 }

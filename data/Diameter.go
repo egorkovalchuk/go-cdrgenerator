@@ -360,7 +360,7 @@ func CreateCCREventMessage(Msisdn RecTypePool, date time.Time, RecordType RecTyp
 	if RecordType.ServiceContextId != "" {
 		diam_message.NewAVP(avp.ServiceContextID, avp.Mbit, 0, datatype.UTF8String(RecordType.ServiceContextId))
 	} else {
-		return nil, "", errors.New("Not use empty ServiceContextId")
+		return nil, "", errors.New("not use empty ServiceContextId")
 	}
 	//{ CC-Request-Type }
 	// Используется тип 4 (просто событие)

@@ -56,3 +56,7 @@ Fix connection to InfluxDBv2
 ## Vesion 0.5.0
 ### new fearure
 Added  CELL and LAC area pool creation  
+## Vesion 0.5.1
+### new fearure
+### Fix Bug
+Fix CAMEL connection 

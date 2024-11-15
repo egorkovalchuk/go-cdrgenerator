@@ -1,6 +1,7 @@
 package tlv
 
 import (
+	"fmt"
 	"net"
 	"sync"
 	"time"
@@ -79,12 +80,6 @@ func (p *Listener) Read(tmpwr []byte) (n int, err error) {
 	return
 }
 
-func (p *Listener) Read1(tmpwr []byte) (n int, err error) {
-	p.mx.RLock()
-	p.mx.RUnlock()
-	return
-}
-
 func (p *Listener) Close() {
 	p.Server.Close()
 }
@@ -113,11 +108,17 @@ func NewListListener() *ListListener {
 }
 
 func (c *ListListener) SaveOpenConn(value net.Conn) {
-	c.List[value.LocalAddr().String()] = NewListener(value)
+	c.List[value.RemoteAddr().String()] = NewListener(value)
+	if debug {
+		LogChannel <- LogStruct{"DEBUG", "Count CAMEL connection " + fmt.Sprint(len(c.List))}
+	}
 }
 
 func (c *ListListener) DeleteCloseConn(value net.Conn) {
-	delete(c.List, value.LocalAddr().String())
+	delete(c.List, value.RemoteAddr().String())
+	if debug {
+		LogChannel <- LogStruct{"DEBUG", "Count CAMEL connection " + fmt.Sprint(len(c.List))}
+	}
 }
 
 func DeleteCloseConn(value net.Conn) {
@@ -125,7 +126,7 @@ func DeleteCloseConn(value net.Conn) {
 }
 
 func (c *ListListener) SaveBRTIdConn(value net.Conn, id byte) {
-	tmp := c.List[value.LocalAddr().String()]
+	tmp := c.List[value.RemoteAddr().String()]
 	tmp.BRTId = id
-	c.List[value.LocalAddr().String()] = tmp
+	c.List[value.RemoteAddr().String()] = tmp
 }

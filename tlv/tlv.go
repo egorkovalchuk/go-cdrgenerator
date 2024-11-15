@@ -269,7 +269,7 @@ func (p *Camel_tcp) LenghtTCP() (uint16, error) {
 	tmp = 8
 	for _, i := range p.Frame {
 		tmp += 4
-		if camel_type_map[i.Type].Static == false {
+		if !camel_type_map[i.Type].Static {
 			tmp += len(i.Param)
 		} else {
 			tmp += camel_type_map[i.Type].MaxLen
@@ -667,6 +667,9 @@ func NewCamelSessionID(MSCGT string, id byte) []byte {
 	for i := 0; i < 8; i++ {
 		if i < ln {
 			bit_left, err = strconv.Atoi(string(MSCGT[i*2]))
+			if err != nil {
+				LogChannel <- LogStruct{"ERROR: Stringtobytereverse", err}
+			}
 			bit_right, err = strconv.Atoi(string(MSCGT[i*2+1]))
 			if err != nil {
 				LogChannel <- LogStruct{"ERROR: NewSessionId", err}
@@ -714,6 +717,9 @@ func Stringtobytereverse(t string) []byte {
 	for i := 0; i <= ln; i++ {
 		if i < ln {
 			bit_left, err = strconv.Atoi(string(t[i*2]))
+			if err != nil {
+				LogChannel <- LogStruct{"ERROR: Stringtobytereverse", err}
+			}
 			bit_right, err = strconv.Atoi(string(t[i*2+1]))
 			if err != nil {
 				LogChannel <- LogStruct{"ERROR: Stringtobytereverse", err}
@@ -751,6 +757,9 @@ func Stringtobyte(t string) []byte {
 	for i := 0; i < ln; i++ {
 		if i < ln {
 			bit_left, err = strconv.Atoi(string(t[i*2]))
+			if err != nil {
+				LogChannel <- LogStruct{"ERROR: Stringtobytereverse", err}
+			}
 			bit_right, err = strconv.Atoi(string(t[i*2+1]))
 			if err != nil {
 				LogChannel <- LogStruct{"ERROR: Stringtobyte", err}

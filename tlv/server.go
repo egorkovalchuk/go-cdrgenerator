@@ -55,12 +55,13 @@ func ServerStart(cfgg *Config, ll *ListListener, debugm bool) {
 	// задать ограничение по количеству открытых коннектов (через структуру)
 	// из цикла не работает
 	LogChannel <- LogStruct{"INFO", "Start schelduler"}
-	heartbeat := time.Tick(time.Duration(cfg.Duration) * time.Second)
+	heartbeat := time.NewTicker(time.Duration(cfg.Duration) * time.Second)
+
 	for {
 		select {
 		// Ждем выполнение таймаута
 		// Добавить в дальнейшем выход по событию от системы
-		case <-heartbeat:
+		case <-heartbeat.C:
 			ln.Close()
 			return
 		default:
@@ -71,10 +72,14 @@ func ServerStart(cfgg *Config, ll *ListListener, debugm bool) {
 			}
 			ll.SaveOpenConn(conn)
 			// Запуск Обработчика
-			go CamelHandler(ll.List[conn.LocalAddr().String()])
+			go CamelHandler(ll.List[conn.RemoteAddr().String()])
 			// Запуск Отправки
 			// Сделать канал только для этого потока?
-			go cfg.RequestFunc(ll.List[conn.LocalAddr().String()], cfg.CamelChannel)
+			go cfg.RequestFunc(ll.List[conn.RemoteAddr().String()], cfg.CamelChannel)
+			if debug {
+				LogChannel <- LogStruct{"DEBUG", "Local address " + conn.LocalAddr().String()}
+				LogChannel <- LogStruct{"DEBUG", "Remote address " + conn.RemoteAddr().String()}
+			}
 		}
 
 	}
@@ -123,7 +128,7 @@ func CamelHandler1(conn *Listener) {
 			return
 		default:
 			LogChannel <- LogStruct{"ERROR", conn.RemoteAddr().String() + err.Error()}
-			return
+			//return
 			//errors.Is(err, os.ErrDeadlineExceeded)
 			//if err, ok := err.(net.Error); ok && err.Timeout()
 			//read tcp 127.0.0.1:4868->127.0.0.1:64556: i/o timeout
@@ -139,8 +144,8 @@ func CamelHandler(conn *Listener) {
 
 	LogChannel <- LogStruct{"INFO", "Client connected from  " + conn.RemoteAddr().String()}
 	// KeepAliveServer
-	heartbeat := time.Tick(20 * time.Second)
-	timeoutDuration := 1 * time.Second
+	heartbeat := time.NewTicker(20 * time.Second)
+	timeoutDuration := 2 * time.Second
 	conn.SetReadDeadline(time.Now().Add(timeoutDuration))
 
 	// Буффер обратоки большого количества сообщений
@@ -150,7 +155,8 @@ func CamelHandler(conn *Listener) {
 	// Запускаем цикл
 	for {
 		select {
-		case <-heartbeat:
+		case <-heartbeat.C:
+			conn.SetReadDeadline(time.Now().Add(timeoutDuration))
 			LogChannel <- LogStruct{"INFO", conn.RemoteAddr().String() + ": KeepAlive"}
 			// Пока оставляю. но БРТ сам шлет KeepAlive
 			// Надо менять запрос
@@ -194,14 +200,14 @@ func CamelHandler(conn *Listener) {
 				conn.Close()
 				LogChannel <- LogStruct{"INFO", conn.RemoteAddr().String() + ": connection close"}
 				return
-			/*case os.ErrDeadlineExceeded:
-			list_listener.DeleteCloseConn(conn.Server)
-			conn.Close()
-			LogChannel <- LogStruct{"INFO", conn.RemoteAddr().String() + ": connection close(ErrDeadlineExceeded1)"}
-			return*/
+			case os.ErrDeadlineExceeded:
+				list_listener.DeleteCloseConn(conn.Server)
+				conn.Close()
+				LogChannel <- LogStruct{"INFO", conn.RemoteAddr().String() + ": connection close(ErrDeadlineExceeded1)"}
+				return
 			default:
 				LogChannel <- LogStruct{"ERROR", conn.RemoteAddr().String() + err.Error()}
-				return
+				//return
 				// Сделфать закрытие коннекта  горутины
 				//read tcp 127.0.0.1:4868->127.0.0.1:64556: i/o timeout
 			}

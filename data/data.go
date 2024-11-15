@@ -253,8 +253,8 @@ func CreateCDRRecord(RecordMsisdn RecTypePool, date time.Time, RecordType RecTyp
 	} else {
 		CDR_pattern = strings.Replace(CDR_pattern, "{msisdnB}", cfg.MsisdnB, 1)
 	}
-	CDR_pattern = strings.Replace(CDR_pattern, "{lac_a}", strconv.Itoa(lc.CELL), 1)
-	CDR_pattern = strings.Replace(CDR_pattern, "{call_a}", strconv.Itoa(lc.LAC), 1)
+	CDR_pattern = strings.Replace(CDR_pattern, "{lac_a}", strconv.Itoa(lc.LAC), 1)
+	CDR_pattern = strings.Replace(CDR_pattern, "{cell_a}", strconv.Itoa(lc.CELL), 1)
 	return CDR_pattern, nil
 }
 
@@ -275,7 +275,7 @@ func NewCounters() *Counters {
 // Получить значение
 func (c *Counters) Load(key string) int {
 	c.mx.Lock()
-	val, _ := c.m[key]
+	val := c.m[key]
 	c.mx.Unlock()
 	return val
 }
@@ -347,12 +347,12 @@ func NewFlag() *FlagType {
 // Получить значение
 func (c *FlagType) Load(key string) int {
 	c.mx.Lock()
-	val, _ := c.m[key]
+	val := c.m[key]
 	c.mx.Unlock()
 	return val
 }
 
-//Загрузить значение
+// Загрузить значение
 func (c *FlagType) Store(key string, value int) {
 	c.mx.Lock()
 	c.m[key] = value
@@ -374,9 +374,9 @@ func NewRecTypeCounters() *RecTypeCounters {
 }
 
 func (c *RecTypeCounters) AddMap(key1 string, key2 string, val int) map[string]map[string]int {
-	mm, ok := c.m[key1]
+	_, ok := c.m[key1]
 	if !ok {
-		mm = make(map[string]int)
+		mm := make(map[string]int)
 		c.m[key1] = mm
 	}
 	c.m[key1][key2] = val
@@ -386,12 +386,12 @@ func (c *RecTypeCounters) AddMap(key1 string, key2 string, val int) map[string]m
 // Получить значение
 func (c *RecTypeCounters) Load(key1 string, key2 string) int {
 	c.mx.Lock()
-	val, _ := c.m[key1][key2]
+	val := c.m[key1][key2]
 	c.mx.Unlock()
 	return val
 }
 
-//Загрузить значение
+// Загрузить значение
 func (c *RecTypeCounters) Store(key1 string, key2 string, value int) {
 	c.mx.Lock()
 	c.m[key1][key2] = value
@@ -407,7 +407,7 @@ func (c *RecTypeCounters) Inc(key1 string, key2 string) {
 
 func (c *RecTypeCounters) LoadString(key1 string, key2 string) string {
 	c.mx.Lock()
-	val, _ := c.m[key1][key2]
+	val := c.m[key1][key2]
 	c.mx.Unlock()
 	return strconv.Itoa(val)
 }
@@ -441,7 +441,7 @@ func (i *ArgListType) Get(value string) bool {
 	return false
 }
 
-//Массив для работы с кешем запросов
+// Массив для работы с кешем запросов
 type BrtOfflineCdr struct {
 	mx         sync.RWMutex
 	CDROffline map[string](TypeBrtOfflineCdr)
@@ -457,7 +457,7 @@ func NewCDROffline() *BrtOfflineCdr {
 // Получить значение
 func (c *BrtOfflineCdr) Load(key string) TypeBrtOfflineCdr {
 	c.mx.RLock()
-	val, _ := c.CDROffline[key]
+	val := c.CDROffline[key]
 	c.mx.RUnlock()
 	return val
 }

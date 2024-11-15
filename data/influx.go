@@ -59,7 +59,7 @@ func StartWriteInflux(cfg CommonType, f func(logtext interface{}), InputString c
 			f("Write error " + strconv.Itoa(rsp.StatusCode) + " " + request + str)
 		}
 
-		defer cli.CloseIdleConnections()
+		cli.CloseIdleConnections()
 	}
 }
 

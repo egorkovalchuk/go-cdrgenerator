@@ -190,6 +190,7 @@ func InitVariables() {
 			LACCELLpool[task.Name] = append(LACCELLpool[task.Name], data.RecTypeLACPool{LAC: task.DefaultLAC, CELL: task.DefaultCELL})
 			LACCELLlen[task.Name] = len(LACCELLpool[task.Name])
 		}
+		ProcessDebug("First record " + fmt.Sprint(LACCELLpool[task.Name][0]))
 	}
 }
 

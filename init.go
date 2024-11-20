@@ -108,8 +108,6 @@ func InitVariables() {
 		global_cfg.Common.Duration = 14400
 	}
 
-	time_sleep = 1000000 / global_cfg.Common.Duration
-
 	// Обнуляем счетчик и инициализируем
 	for _, task := range global_cfg.Tasks {
 		// Иницмализация счетчика
@@ -144,6 +142,8 @@ func InitVariables() {
 			// Инициализация счетчика типов звонка
 			CDRRecTypeCount.AddMap(task.Name, task.RecTypeRatio[i].Name, 0)
 		}
+		// Формируем задержку для равномерного формирования
+		task.Time_delay = 1000000 / task.CallsPerSecond
 	}
 
 	// Счетчик записи в БРТ

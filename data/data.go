@@ -80,6 +80,8 @@ type TasksType struct {
 	DefaultCELL int `json:"DefaultCELL"`
 	// Пул с перечнем LAC/CELL
 	DatapoolCsvLac string `json:"datapool_csv_lac"`
+	// временной лаг задерржки для равномерного формирования запросов
+	Time_delay int
 }
 
 // Тип структуры описания логического вызова, сервис кодов

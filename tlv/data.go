@@ -2,6 +2,7 @@ package tlv
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"time"
@@ -17,6 +18,10 @@ type Listener struct {
 	BRTId   byte
 	mx      sync.RWMutex
 
+	// Эксперимент
+	// возможно из-за блокировок может тормозить
+	WriteChan chan []byte
+
 	quit chan interface{}
 }
 
@@ -24,6 +29,13 @@ type Listener struct {
 type LogStruct struct {
 	t    string
 	text interface{}
+}
+
+// Эксперимент
+// Структура для записи в канал
+type WriteStruck struct {
+	C *Listener
+	B []byte
 }
 
 // Конфиг Камела
@@ -71,6 +83,21 @@ func (p *Listener) WriteTo(tmpwr []byte) (n int, err error) {
 	n, err = p.Server.Write(tmpwr)
 	p.mx.Unlock()
 	return
+}
+
+func (p *Listener) WriteChannel(in chan []byte) {
+	for tmpwr := range in {
+		if _, err := p.WriteTo(tmpwr); err != nil {
+			LogChannel <- LogStruct{"ERROR", err}
+			if err == io.EOF {
+				p.Close()
+				DeleteCloseConn(p.Server)
+				LogChannel <- LogStruct{"INFO", p.RemoteAddr().String() + ": connection close"}
+				LogChannel <- LogStruct{"INFO", "Close threads"}
+				return
+			}
+		}
+	}
 }
 
 func (p *Listener) Read(tmpwr []byte) (n int, err error) {

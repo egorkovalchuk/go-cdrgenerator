@@ -32,7 +32,7 @@ import (
 const (
 	logFileName = "generator.log"
 	pidFileName = "generator.pid"
-	versionutil = "0.5.1"
+	versionutil = "0.5.2"
 )
 
 var (
@@ -56,9 +56,6 @@ var (
 	// Каналы для управления и передачи информации
 	ProcessChannel = make(chan string)
 	LogChannel     = make(chan LogStruct)
-
-	// Задержка при отсылки информации для tcp
-	time_sleep int
 
 	// Признак запуска дополнительного потока
 	Flag = data.NewFlag()
@@ -93,6 +90,7 @@ var (
 	// Канал записи в Camel
 	CamelChannel  = make(chan tlv.Camel_tcp, 2000)
 	list_listener *tlv.ListListener
+	WriteChan     = make(chan tlv.WriteStruck, 2000)
 
 	// Канал записи статистики в БД
 	ReportStat = make(chan string, 1000)
@@ -546,7 +544,7 @@ func StartTaskDiam(PoolList data.PoolSubs, cfg data.TasksType, FirstStart bool) 
 
 					// Стараемся отсылать равномерно, в условии что, пропускать уже обнуленные CallsCount
 					if slow {
-						sleep(time.Duration(time_sleep) * time.Nanosecond)
+						sleep(time.Duration(cfg.Time_delay) * time.Nanosecond)
 					}
 					CreateDiamMessage(PoolList[PoolIndex], cfg.Name, cfg.RecTypeRatio[RecTypeIndex])
 				} else {
@@ -770,12 +768,8 @@ func SendCCREvent(c diam.Conn, cfg *sm.Settings, in chan data.DiamCH) {
 			} else {
 				CDRDiamCount.Inc(server)
 			}
-
-		default:
-
 		}
 	}
-
 }
 
 // StartDaemonMode запуск в режиме демона
@@ -847,6 +841,11 @@ func StartTaskCamel(PoolList data.PoolSubs, cfg data.TasksType, FirstStart bool)
 		PoolIndex = 0
 		PoolIndexMax = len(PoolList) - 1
 
+		var ll bool
+		if brt && brtlist.Get(cfg.Name) {
+			ll = true
+		}
+
 		for {
 
 			// Порождать доп процессы может только первый процесс
@@ -889,7 +888,7 @@ func StartTaskCamel(PoolList data.PoolSubs, cfg data.TasksType, FirstStart bool)
 
 					// Стараемся отсылать равномерно
 					if slow {
-						sleep(time.Duration(time_sleep) * time.Nanosecond)
+						sleep(time.Duration(cfg.Time_delay) * time.Nanosecond)
 					}
 
 					switch {
@@ -898,7 +897,7 @@ func StartTaskCamel(PoolList data.PoolSubs, cfg data.TasksType, FirstStart bool)
 							time.Sleep(time.Duration(10) * time.Second)
 						}
 						CreateCamelMessage(PoolList[PoolIndex], cfg.Name, cfg.RecTypeRatio[RecTypeIndex])
-					case cfg.RecTypeRatio[RecTypeIndex].DefaultChan == "diameter" && brt && brtlist.Get(cfg.Name):
+					case cfg.RecTypeRatio[RecTypeIndex].DefaultChan == "diameter" && ll:
 						CreateDiamMessage(PoolList[PoolIndex], cfg.Name, cfg.RecTypeRatio[RecTypeIndex])
 					default:
 						rr, err := data.CreateCDRRecord(PoolList[PoolIndex], time.Now(), cfg.RecTypeRatio[RecTypeIndex], CDRPatternTask[cfg.Name], data.RandomMSISDN(cfg.Name), LACCELLpool[cfg.Name][rand.Intn(LACCELLlen[cfg.Name])])
@@ -942,6 +941,7 @@ func StartCamelServer() {
 	list_listener = tlv.NewListListener()
 
 	go tlv.ServerStart(camel_cfg, list_listener, debugm)
+	go CamelWrite(WriteChan)
 
 	// Ждем открытие хотя бы одного соединения
 	// Потоки дочерних поднимаются листенером
@@ -954,28 +954,43 @@ func StartCamelServer() {
 	}
 }
 
+// Горутина записи в поток Camel
+// Эксперимент
+func CamelWrite(in chan tlv.WriteStruck) {
+	for tmp := range in {
+		if _, err = tmp.C.WriteTo(tmp.B); err != nil {
+			ProcessError(err)
+			if err == io.EOF {
+				tmp.C.Close()
+				tlv.DeleteCloseConn(tmp.C.Server)
+				ProcessInfo(tmp.C.RemoteAddr().String() + ": connection close")
+				ProcessInfo("Close threads")
+			}
+		}
+	}
+}
+
 // Горутина записи сообщения по Camel
 func CamelSend() tlv.HandReq {
 	return func(c *tlv.Listener, in chan tlv.Camel_tcp) {
-		for {
-			select {
-			case tmprw := <-in:
-				// Прописываем id BRT
-				tmprw.Frame[0x002C].Param[13] = c.BRTId
-				tmp, _ := tmprw.Encoder()
-				if _, err = c.WriteTo(tmp); err != nil {
-					ProcessError(err)
-					if err == io.EOF {
-						c.Close()
-						tlv.DeleteCloseConn(c.Server)
-						ProcessInfo(c.RemoteAddr().String() + ": connection close")
-						ProcessInfo("Close threads")
-						return
-					}
-				} else {
-					CDRCamelCount.Inc(c.RemoteAddr().String())
+		for tmprw := range in {
+			// Прописываем id BRT
+			tmprw.Frame[0x002C].Param[13] = c.BRTId
+			tmp, _ := tmprw.Encoder()
+			WriteChan <- tlv.WriteStruck{C: c, B: tmp}
+			CDRCamelCount.Inc(c.RemoteAddr().String())
+			/*if _, err = c.WriteTo(tmp); err != nil {
+				ProcessError(err)
+				if err == io.EOF {
+					c.Close()
+					tlv.DeleteCloseConn(c.Server)
+					ProcessInfo(c.RemoteAddr().String() + ": connection close")
+					ProcessInfo("Close threads")
+					return
 				}
-			}
+			} else {
+				CDRCamelCount.Inc(c.RemoteAddr().String())
+			}*/
 		}
 	}
 }
@@ -1020,7 +1035,7 @@ func CamelResponse() tlv.HandOK {
 				if err != nil {
 					ProcessError(err)
 				}
-				if _, err = c.WriteTo(tmprw); err != nil {
+				/*if _, err = c.WriteTo(tmprw); err != nil {
 					ProcessError(err)
 					if err == io.EOF {
 						c.Close()
@@ -1028,7 +1043,8 @@ func CamelResponse() tlv.HandOK {
 						ProcessInfo(c.RemoteAddr().String() + ": connection close")
 						return
 					}
-				}
+				}*/
+				WriteChan <- tlv.WriteStruck{C: c, B: tmprw}
 				CDRCamelResponseCount.Inc(fmt.Sprint(int(camel.Frame[0x002C].Param[13])) + " CONFIRM SMS")
 			}
 		case camel.Type == tlv.TYPE_ENDSMS_RESP:
@@ -1058,7 +1074,7 @@ func CamelResponse() tlv.HandOK {
 				if err != nil {
 					ProcessError(err)
 				}
-				if _, err = c.WriteTo(tmprw); err != nil {
+				/*if _, err = c.WriteTo(tmprw); err != nil {
 					ProcessError(err)
 					if err == io.EOF {
 						c.Close()
@@ -1066,7 +1082,8 @@ func CamelResponse() tlv.HandOK {
 						ProcessInfo(c.RemoteAddr().String() + ": connection close")
 						return
 					}
-				}
+				}*/
+				WriteChan <- tlv.WriteStruck{C: c, B: tmprw}
 				CDRCamelResponseCount.Inc(fmt.Sprint(int(camel.Frame[0x002C].Param[13])) + " CONFIRM VOICE")
 			}
 		case camel.Type == tlv.TYPE_ENDVOICE_RESP:

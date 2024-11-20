@@ -70,3 +70,7 @@ Added  CELL and LAC area pool creation
 ### new fearure
 ### Fix Bug
 Fix CAMEL connection
+Fix time delay sending
+## Vesion 0.5.2
+### new fearure
+Experimental(one write stream in camel)

@@ -74,3 +74,5 @@ Fix time delay sending
 ## Vesion 0.5.2
 ### new fearure
 Experimental(one write stream in camel)
+### Fix Bug
+Fix context 

@@ -5,6 +5,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os/signal"
+	"syscall"
 
 	"log"
 	"math/rand"
@@ -100,7 +102,7 @@ var (
 	LACCELLlen  = make(map[string](int))
 
 	// Маркер завершения горутин генерации нагрузки
-	st = false
+	gostop = false
 	// Тестовый параметр замедления
 	slow       bool // Равномерная запись
 	slow_camel bool // Запись раз в 10 секунд - можно удали что бы не съедать машинное время
@@ -112,13 +114,11 @@ var (
 	thread_secodary bool
 
 	// тест
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx  context.Context
+	stop context.CancelFunc
 )
 
 func main() {
-
-	//defer profile.Start(profile.MemProfile, profile.ProfilePath("C:/Temp")).Stop()
 	//start program
 	var argument string
 	/*var progName string
@@ -145,10 +145,6 @@ func main() {
 	flag.Var(&brtlist, "brtlist", "List of name task to work BRT")
 	flag.BoolVar(&rm, "rm", false, "Delete files")
 	flag.BoolVar(&thread_secodary, "thread", false, "Enable start new threads")
-	// for Linux compile
-	// Для использования передачи системных сигналов
-	stdaemon := flag.Bool("s", false, "a bool") // для передачи
-	// --for Linux compile
 	// замедление и тесты
 	flag.BoolVar(&slow, "slow", false, "Start with slow mode")
 	flag.BoolVar(&slow_camel, "slow_camel", false, "Start with slow_camel mode")
@@ -188,7 +184,10 @@ func main() {
 	InitVariables()
 
 	// запуск контекста
-	ctx, cancel = context.WithCancel(context.Background())
+	//ctx, cancel = context.WithCancel(context.Background())
+	ctx = context.Background()
+	ctx, stop = signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	// Запуск мониторинга
 	// вркменно отключено для демона
@@ -202,7 +201,7 @@ func main() {
 
 	// Определяем ветку
 	// Запускать горутиной с ожиданием процесса сигналов от ОС
-	if startdaemon || *stdaemon {
+	if startdaemon {
 		StartDaemonMode()
 		ProcessInfo("Daemon terminated")
 	} else {
@@ -522,7 +521,7 @@ func StartTaskDiam(PoolList data.PoolSubs, cfg data.TasksType, FirstStart bool) 
 				}
 			}
 			// Выход из горутины
-			if st {
+			if gostop {
 				return
 			}
 
@@ -859,7 +858,7 @@ func StartTaskCamel(PoolList data.PoolSubs, cfg data.TasksType, FirstStart bool)
 				}
 			}
 			// Выход из горутины
-			if st {
+			if gostop {
 				return
 			}
 			// пропуск шага если нет активных соединений
@@ -971,6 +970,7 @@ func CamelWrite(in chan tlv.WriteStruck) {
 }
 
 // Горутина записи сообщения по Camel
+// Автоматически прописывается brt_id в зависимости от запущенных горутин CamelSend
 func CamelSend() tlv.HandReq {
 	return func(c *tlv.Listener, in chan tlv.Camel_tcp) {
 		for tmprw := range in {
@@ -1226,12 +1226,19 @@ func end() {
 	ProcessInfo("Start schelduler")
 	// Ждем выполнение таймаута
 	// Добавить в дальнейшем выход по событию от системы
-	time.Sleep(time.Duration(global_cfg.Common.Duration) * time.Second)
+	go func() {
+		<-time.After(time.Duration(global_cfg.Common.Duration) * time.Second)
+		stop()
+	}()
 
+	<-ctx.Done()
 	ProcessInfo("Stoping")
-	// Остановка гортин.
-	st = true
-	cancel()
+	gostop = true
+
+	// Закрытие окрытого порта
+	if camel {
+		tlv.ServerStop()
+	}
 
 	// Задержка остановки, Ждем досылки ответов
 	kk := 0

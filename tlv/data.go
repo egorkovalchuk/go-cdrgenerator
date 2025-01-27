@@ -21,8 +21,6 @@ type Listener struct {
 	// Эксперимент
 	// возможно из-за блокировок может тормозить
 	WriteChan chan []byte
-
-	quit chan interface{}
 }
 
 // Пишем логи через горутину
@@ -70,9 +68,7 @@ type HandReq func(*Listener, chan Camel_tcp)
 
 // Конструктор для открытого соединения
 func NewListener(conn net.Conn) *Listener {
-	s := &Listener{
-		quit: make(chan interface{}),
-	}
+	s := &Listener{}
 	s.Server = conn
 	s.Address = conn.LocalAddr()
 	return s

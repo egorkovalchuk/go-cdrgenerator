@@ -10,6 +10,16 @@ import (
 	"time"
 )
 
+type Report struct {
+	Influx        bool   `json:"Influx"`
+	InfluxToken   string `json:"InfluxToken"`
+	InfluxOrg     string `json:"InfluxOrg"`
+	InfluxVersion int    `json:"InfluxVersion"`
+	InfluxBucket  string `json:"InfluxBucket"`
+	InfluxServer  string `json:"InfluxServer"`
+	Region        string `json:"Region"`
+}
+
 // Запуск горутины записи статистики в БД
 func StartWriteInflux(cfg CommonType, f func(logtext interface{}), InputString chan string) {
 

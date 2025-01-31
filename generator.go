@@ -19,6 +19,7 @@ import (
 	"context"
 
 	"github.com/egorkovalchuk/go-cdrgenerator/data"
+	"github.com/egorkovalchuk/go-cdrgenerator/pid"
 	"github.com/egorkovalchuk/go-cdrgenerator/tlv"
 	"github.com/fiorix/go-diameter/v4/diam"
 	"github.com/fiorix/go-diameter/v4/diam/avp"
@@ -34,7 +35,7 @@ import (
 const (
 	logFileName = "generator.log"
 	pidFileName = "generator.pid"
-	versionutil = "0.5.2"
+	versionutil = "0.5.3"
 )
 
 var (
@@ -121,10 +122,8 @@ var (
 func main() {
 	//start program
 	var argument string
-	/*var progName string
-	progName = os.Args[0]*/
 
-	if os.Args != nil && len(os.Args) > 1 {
+	if len(os.Args) > 1 {
 		argument = os.Args[1]
 	} else {
 		data.HelpStart()
@@ -133,6 +132,12 @@ func main() {
 
 	if argument == "-h" {
 		data.HelpStart()
+		return
+	} else if argument == "-s" {
+		err = pid.StopProcess(pidFileName)
+		if err != nil {
+			fmt.Println(err.Error)
+		}
 		return
 	}
 
@@ -183,8 +188,13 @@ func main() {
 	// инициализация переменных
 	InitVariables()
 
+	// создаем pid
+	err = pid.SetPID(pidFileName)
+	if err != nil {
+		ProcessError("Can not create pid-file: " + err.Error())
+	}
+
 	// запуск контекста
-	//ctx, cancel = context.WithCancel(context.Background())
 	ctx = context.Background()
 	ctx, stop = signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -1231,7 +1241,9 @@ func end() {
 		stop()
 	}()
 
+	// Ждем получения от контекста о завершении
 	<-ctx.Done()
+	ProcessInfo(ctx.Err().Error())
 	ProcessInfo("Stoping")
 	gostop = true
 
@@ -1290,6 +1302,13 @@ func end() {
 
 	// Очищаем директории
 	if rm {
+		ProcessInfo("Remove CDR files")
 		delfilefortest()
 	}
+
+	err = pid.RemovePID(pidFileName)
+	if err != nil {
+		ProcessError("Can not remove pid-file: " + err.Error())
+	}
+	ProcessInfo("Remove PID file")
 }

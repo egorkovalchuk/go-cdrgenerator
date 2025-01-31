@@ -76,3 +76,6 @@ Fix time delay sending
 Experimental(one write stream in camel)
 ### Fix Bug
 Fix context 
+## Vesion 0.5.2
+### new fearure
+Add stop for linux

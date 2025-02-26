@@ -16,7 +16,6 @@ func SetPID(logFileName string) error {
 	}
 	filer.WriteString(fmt.Sprint(os.Getpid()))
 	filer.Close()
-	fmt.Println(runtime.GOOS)
 	return nil
 }
 

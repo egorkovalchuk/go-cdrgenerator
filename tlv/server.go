@@ -1,6 +1,7 @@
 package tlv
 
 import (
+	"context"
 	"io"
 	"log"
 	"net"
@@ -15,17 +16,17 @@ var (
 	camel_type_map   map[string]camel_type_len
 
 	// Канал записи в лог
-	LogChannel = make(chan LogStruct)
+	LogChannel = make(chan LogStruct, 1000)
 	// сделать обнуление
-	Sec uint32 = 0
+	//Sec uint32 = 0
 
 	// Структура с открытыми соединениями
-	list_listener *ListListener
+	//	list_listener *ListListener
 	// Конфиг
-	cfg *Config
+	//cfg *Config
 
 	// Слушатель открытого порта
-	ln  net.Listener
+	//ln  net.Listener
 	err error
 )
 
@@ -40,48 +41,60 @@ func (c *Client) Dial() error {
 	return nil
 }
 
-func ServerStart(cfgg *Config, ll *ListListener, debugm bool) {
-	debug = debugm
+// Объявление нвого сервера
+func NewServer(cfg *Config, listeners *ListListener) *Server {
+	s := &Server{
+		cfg:       cfg,
+		listeners: listeners,
+		Sec:       0,
+	}
+	return s
+}
+
+func SetDebug(c bool) {
+	debug = c
+}
+
+func (s *Server) ServerStart(ctx context.Context) {
 
 	LogChannel <- LogStruct{"INFO", "Starting CAMEL SCP"}
-	list_listener = ll
-	cfg = cfgg
-	InitMSC()
+	//list_listener = ll
+	//cfg = cfgg
+	s.InitMSC()
 	// Устанавливаем прослушивание порта
 
-	ln, err = net.Listen("tcp", ":"+strconv.Itoa(cfg.Camel_port))
+	s.ln, err = net.Listen("tcp", ":"+strconv.Itoa(s.cfg.Camel_port))
 
 	if err != nil {
 		LogChannel <- LogStruct{"ERROR", err}
 		return
 	}
-	defer ln.Close()
+	defer s.ln.Close()
 
 	// Открываем портб занести в цикл для много поточной обработки
 	// задать ограничение по количеству открытых коннектов (через структуру)
 	// из цикла не работает
 	LogChannel <- LogStruct{"INFO", "Start schelduler"}
-	heartbeat := time.NewTicker(time.Duration(cfg.Duration) * time.Second)
 
 	for {
 		select {
 		// Ждем выполнение таймаута
 		// Добавить в дальнейшем выход по событию от системы
-		case <-heartbeat.C:
-			ln.Close()
+		case <-ctx.Done():
+			s.ln.Close()
 			return
 		default:
-			conn, err := ln.Accept()
+			conn, err := s.ln.Accept()
 			if err != nil {
 				LogChannel <- LogStruct{"ERROR", err}
 				return
 			}
-			ll.SaveOpenConn(conn)
+			s.listeners.SaveOpenConn(conn)
 			// Запуск Обработчика
-			go CamelHandler(ll.List[conn.RemoteAddr().String()])
+			go s.CamelHandler(s.listeners.List[conn.RemoteAddr().String()])
 			// Запуск Отправки
 			// Сделать канал только для этого потока?
-			go cfg.RequestFunc(ll.List[conn.RemoteAddr().String()], cfg.CamelChannel)
+			go s.cfg.RequestFunc(s.listeners.List[conn.RemoteAddr().String()], s.cfg.CamelChannel)
 			if debug {
 				LogChannel <- LogStruct{"DEBUG", "Local address " + conn.LocalAddr().String()}
 				LogChannel <- LogStruct{"DEBUG", "Remote address " + conn.RemoteAddr().String()}
@@ -93,7 +106,7 @@ func ServerStart(cfgg *Config, ll *ListListener, debugm bool) {
 }
 
 // Один ощий обработчик чтение/запись(keepalive)
-func CamelHandler(conn *Listener) {
+func (s *Server) CamelHandler(conn *Listener) {
 	defer conn.Close()
 
 	LogChannel <- LogStruct{"INFO", "Client connected from  " + conn.RemoteAddr().String()}
@@ -110,7 +123,7 @@ func CamelHandler(conn *Listener) {
 	for {
 		select {
 		case <-heartbeat.C:
-			conn.SetReadDeadline(time.Now().Add(timeoutDuration))
+			// conn.SetReadDeadline(time.Now().Add(timeoutDuration))
 			LogChannel <- LogStruct{"INFO", conn.RemoteAddr().String() + ": KeepAlive"}
 			// Пока оставляю. но БРТ сам шлет KeepAlive
 			// Надо менять запрос
@@ -119,14 +132,14 @@ func CamelHandler(conn *Listener) {
 				LogChannel <- LogStruct{"ERROR", err}
 				if err == io.EOF {
 					LogChannel <- LogStruct{"INFO", conn.RemoteAddr().String() + ": connection close"}
-					list_listener.DeleteCloseConn(conn.Server)
+					s.listeners.DeleteCloseConn(conn.Server)
 				}
 			}
 		default:
-			//message_io := bufio.NewScanner(conn).Bytes()
-			//Буффер это хорошо, но может переполнятся
-			//по идее надо вычитывать пакеты с учетом длины
-			conn.SetReadDeadline(time.Now().Add(timeoutDuration))
+			// message_io := bufio.NewScanner(conn).Bytes()
+			// Буффер это хорошо, но может переполнятся
+			// по идее надо вычитывать пакеты с учетом длины
+			conn.SetReadDeadline(time.Time{})
 			buff := make([]byte, 16048)
 			n, err := conn.Read(buff)
 
@@ -142,7 +155,7 @@ func CamelHandler(conn *Listener) {
 					}
 					// если посчитан пакет. то вызываем обработчик
 					if cont != -1 {
-						CamelResponse(conn, camel)
+						s.CamelResponse(conn, camel)
 					}
 					// считаем пока буффер больше пакета
 					if cont < 1 {
@@ -150,12 +163,12 @@ func CamelHandler(conn *Listener) {
 					}
 				}
 			case io.EOF:
-				list_listener.DeleteCloseConn(conn.Server)
+				s.listeners.DeleteCloseConn(conn.Server)
 				conn.Close()
 				LogChannel <- LogStruct{"INFO", conn.RemoteAddr().String() + ": connection close"}
 				return
 			case os.ErrDeadlineExceeded:
-				list_listener.DeleteCloseConn(conn.Server)
+				s.listeners.DeleteCloseConn(conn.Server)
 				conn.Close()
 				LogChannel <- LogStruct{"INFO", conn.RemoteAddr().String() + ": connection close(ErrDeadlineExceeded1)"}
 				return
@@ -172,7 +185,7 @@ func CamelHandler(conn *Listener) {
 // Основной обработчик входящего трафика
 // После стандартных запросов идет переадресация на объявленную функции из основного потока
 //func CamelResponse(conn net.Conn, camel Camel_tcp) {
-func CamelResponse(conn *Listener, camel Camel_tcp) {
+func (s *Server) CamelResponse(conn *Listener, camel Camel_tcp) {
 	var camel_tmp Camel_tcp
 	var err error
 
@@ -185,13 +198,13 @@ func CamelResponse(conn *Listener, camel Camel_tcp) {
 			LogChannel <- LogStruct{"ERROR", err}
 		}
 		LogChannel <- LogStruct{"INFO", conn.RemoteAddr().String() + ": Initial SCP"}
-		list_listener.SaveBRTIdConn(conn.Server, camel.Frame[0x0050].Param[0])
+		s.listeners.SaveBRTIdConn(conn.Server, camel.Frame[0x0050].Param[0])
 	case camel.Type == TYPE_KEEPALIVE_RESP:
 		LogChannel <- LogStruct{"INFO", conn.RemoteAddr().String() + ": KeepAlive BRT <- SCP - OK"}
 	case camel.Type == TYPE_KEEPALIVE_REQ:
 		camel_tmp.Type = TYPE_KEEPALIVE_RESP
 		camel_tmp.Sequence = camel.Sequence
-		Sec = camel.Sequence
+		s.Sec = camel.Sequence
 		tmprw, _ := camel_tmp.Encoder()
 		if _, err = conn.WriteTo(tmprw); err != nil {
 			LogChannel <- LogStruct{"ERROR", err}
@@ -200,7 +213,7 @@ func CamelResponse(conn *Listener, camel Camel_tcp) {
 	default:
 		// Вызов основного обработчика из основного кода
 		// Запись ошибок, можно сделать экспериент, с передачей на уровень выше
-		cfg.ResponseFunc(conn, camel)
+		s.cfg.ResponseFunc(conn, camel)
 	}
 }
 
@@ -240,7 +253,7 @@ func LogWriteForGoRutine(text chan LogStruct) {
 	}
 }
 
-func ServerStop() {
+func (s *Server) ServerStop() {
 	LogChannel <- LogStruct{"INFO", "Stoping CAMEL SCP"}
-	ln.Close()
+	s.ln.Close()
 }

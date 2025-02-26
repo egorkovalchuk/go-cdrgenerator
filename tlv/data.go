@@ -8,6 +8,14 @@ import (
 	"time"
 )
 
+type Server struct {
+	cfg             *Config
+	listeners       *ListListener
+	ln              net.Listener
+	LocationMSCbase []byte
+	Sec             uint32
+}
+
 type Client struct {
 	Address net.IP
 }
@@ -38,8 +46,8 @@ type WriteStruck struct {
 
 // Конфиг Камела
 type Config struct {
-	Camel_port       int
-	Duration         int
+	Camel_port int
+	//	Duration         int
 	Camel_SCP_id     uint8
 	Camel_SMSAddress string
 	XVLR             string
@@ -81,13 +89,14 @@ func (p *Listener) WriteTo(tmpwr []byte) (n int, err error) {
 	return
 }
 
-func (p *Listener) WriteChannel(in chan []byte) {
+// передать слушатель?
+func (p *Listener) WriteChannel(in chan []byte, s *Server) {
 	for tmpwr := range in {
 		if _, err := p.WriteTo(tmpwr); err != nil {
 			LogChannel <- LogStruct{"ERROR", err}
 			if err == io.EOF {
 				p.Close()
-				DeleteCloseConn(p.Server)
+				s.listeners.DeleteCloseConn(p.Server)
 				LogChannel <- LogStruct{"INFO", p.RemoteAddr().String() + ": connection close"}
 				LogChannel <- LogStruct{"INFO", "Close threads"}
 				return
@@ -144,8 +153,8 @@ func (c *ListListener) DeleteCloseConn(value net.Conn) {
 	}
 }
 
-func DeleteCloseConn(value net.Conn) {
-	list_listener.DeleteCloseConn(value)
+func DeleteCloseConn(value net.Conn, s *Server) {
+	s.listeners.DeleteCloseConn(value)
 }
 
 func (c *ListListener) SaveBRTIdConn(value net.Conn, id byte) {

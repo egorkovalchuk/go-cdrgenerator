@@ -1,8 +1,8 @@
 # CDR Generator (online/offline)
 Generator for creating offline and online load on Credit Control systems (3GPP), billing system testing, analytics, and other applications working with call data records
 
-# Main Features
-## Generation of CDR (Call Detail Record) entries in CSV format.
+## Main Features
+### Generation of CDR (Call Detail Record) entries in CSV format.
 * Configuration of the number of records.
 * Support for various call parameters:
 * Call start and end time.
@@ -12,23 +12,23 @@ Generator for creating offline and online load on Credit Control systems (3GPP),
 * Call result code.
 * Ease of use and integration.
 * Offline traffic generates CDR files and transfers them to a directory for further processing.
-## Online traffic supports:
+### Online traffic supports:
 * Diameter + AVP
 * Camel (SCP) (via TVL decoder + ASN)
 
-# Offline Mode
+## Offline Mode
 Generates CDR files and transfers them to a specified directory for subsequent processing.
-# Online Mode
-## Diameter + AVP:
-When receiving codes such as 4011 or Continum , an offline CDR is generated for Diameter transactions.
-## Camel (SCP):
-When receiving the code TYPE_AUTHORIZESMS_REJECT , an offline CDR is generated for Camel (SCP) transactions.
+## Online Mode
+### Diameter + AVP:
+When receiving codes such as **4011** or **Continum** , an offline CDR is generated for Diameter transactions.
+### Camel (SCP):
+When receiving the code **TYPE_AUTHORIZESMS_REJECT** , an offline CDR is generated for Camel (SCP) transactions.
 
-# Important Note
+## Important Note
 Camel operates only in daemon mode.
 When launching Camel+BRT, sending occurs via Camel (SCP) based on priority.
 
-# Parameters 
+## Parameters 
 * Use **-d** start deamon mode
 * Use **-s** stop deamon mode
 * Use **-debug** start with debug mode
@@ -37,11 +37,11 @@ When launching Camel+BRT, sending occurs via Camel (SCP) based on priority.
 * Use **-brtlist** task list (local,roam)
 * Use **-camel** for UP SCP Server(Camel protocol)
 
-# Test parameters
+## Test parameters
 * Use -rm Delete all files in directories(Test optional)
 * Use -slow_camel to send 1 message every 10 seconds
 
-# Example
+## Example
 
 ```bash
 ./generator -debug -d -camel -brt -brtlist local

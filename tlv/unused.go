@@ -6,7 +6,7 @@ import (
 )
 
 // Обработчик только на получение
-func (s *Server) CamelHandler1(conn *Listener) {
+func CamelHandler1(conn *Listener) {
 	defer conn.Close()
 	// Буффер обратоки большого количества сообщений
 	var buffer_tmp []byte
@@ -33,7 +33,7 @@ func (s *Server) CamelHandler1(conn *Listener) {
 				}
 				// если посчитан пакет. то вызываем обработчик
 				if cont != -1 {
-					s.CamelResponse(conn, camel)
+					CamelResponse(conn, camel)
 				}
 				// считаем пока буффер больше пакета
 				if cont < 1 {
@@ -41,7 +41,7 @@ func (s *Server) CamelHandler1(conn *Listener) {
 				}
 			}
 		case io.EOF:
-			s.listeners.DeleteCloseConn(conn.Server)
+			list_listener.DeleteCloseConn(conn.Server)
 			conn.Close()
 			LogChannel <- LogStruct{"INFO", conn.RemoteAddr().String() + ": connection close"}
 			return

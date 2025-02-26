@@ -18,15 +18,15 @@ var (
 	// Канал записи в лог
 	LogChannel = make(chan LogStruct, 1000)
 	// сделать обнуление
-	//Sec uint32 = 0
+	Sec uint32 = 0
 
 	// Структура с открытыми соединениями
-	//	list_listener *ListListener
+	list_listener *ListListener
 	// Конфиг
-	//cfg *Config
+	cfg *Config
 
 	// Слушатель открытого порта
-	//ln  net.Listener
+	ln  net.Listener
 	err error
 )
 
@@ -41,35 +41,25 @@ func (c *Client) Dial() error {
 	return nil
 }
 
-// Объявление нвого сервера
-func NewServer(cfg *Config, listeners *ListListener) *Server {
-	s := &Server{
-		cfg:       cfg,
-		listeners: listeners,
-		Sec:       0,
-	}
-	return s
-}
-
 func SetDebug(c bool) {
 	debug = c
 }
 
-func (s *Server) ServerStart(ctx context.Context) {
+func ServerStart(cfgg *Config, ll *ListListener, ctx context.Context) {
 
 	LogChannel <- LogStruct{"INFO", "Starting CAMEL SCP"}
-	//list_listener = ll
-	//cfg = cfgg
-	s.InitMSC()
+	list_listener = ll
+	cfg = cfgg
+	InitMSC()
 	// Устанавливаем прослушивание порта
 
-	s.ln, err = net.Listen("tcp", ":"+strconv.Itoa(s.cfg.Camel_port))
+	ln, err = net.Listen("tcp", ":"+strconv.Itoa(cfg.Camel_port))
 
 	if err != nil {
 		LogChannel <- LogStruct{"ERROR", err}
 		return
 	}
-	defer s.ln.Close()
+	defer ln.Close()
 
 	// Открываем портб занести в цикл для много поточной обработки
 	// задать ограничение по количеству открытых коннектов (через структуру)
@@ -81,20 +71,20 @@ func (s *Server) ServerStart(ctx context.Context) {
 		// Ждем выполнение таймаута
 		// Добавить в дальнейшем выход по событию от системы
 		case <-ctx.Done():
-			s.ln.Close()
+			ln.Close()
 			return
 		default:
-			conn, err := s.ln.Accept()
+			conn, err := ln.Accept()
 			if err != nil {
 				LogChannel <- LogStruct{"ERROR", err}
 				return
 			}
-			s.listeners.SaveOpenConn(conn)
+			ll.SaveOpenConn(conn)
 			// Запуск Обработчика
-			go s.CamelHandler(s.listeners.List[conn.RemoteAddr().String()])
+			go CamelHandler(ll.List[conn.RemoteAddr().String()])
 			// Запуск Отправки
 			// Сделать канал только для этого потока?
-			go s.cfg.RequestFunc(s.listeners.List[conn.RemoteAddr().String()], s.cfg.CamelChannel)
+			go cfg.RequestFunc(ll.List[conn.RemoteAddr().String()], cfg.CamelChannel)
 			if debug {
 				LogChannel <- LogStruct{"DEBUG", "Local address " + conn.LocalAddr().String()}
 				LogChannel <- LogStruct{"DEBUG", "Remote address " + conn.RemoteAddr().String()}
@@ -106,7 +96,7 @@ func (s *Server) ServerStart(ctx context.Context) {
 }
 
 // Один ощий обработчик чтение/запись(keepalive)
-func (s *Server) CamelHandler(conn *Listener) {
+func CamelHandler(conn *Listener) {
 	defer conn.Close()
 
 	LogChannel <- LogStruct{"INFO", "Client connected from  " + conn.RemoteAddr().String()}
@@ -132,14 +122,14 @@ func (s *Server) CamelHandler(conn *Listener) {
 				LogChannel <- LogStruct{"ERROR", err}
 				if err == io.EOF {
 					LogChannel <- LogStruct{"INFO", conn.RemoteAddr().String() + ": connection close"}
-					s.listeners.DeleteCloseConn(conn.Server)
+					list_listener.DeleteCloseConn(conn.Server)
 				}
 			}
 		default:
 			// message_io := bufio.NewScanner(conn).Bytes()
 			// Буффер это хорошо, но может переполнятся
 			// по идее надо вычитывать пакеты с учетом длины
-			conn.SetReadDeadline(time.Time{})
+			// conn.SetReadDeadline(time.Now().Add(timeoutDuration))
 			buff := make([]byte, 16048)
 			n, err := conn.Read(buff)
 
@@ -155,7 +145,7 @@ func (s *Server) CamelHandler(conn *Listener) {
 					}
 					// если посчитан пакет. то вызываем обработчик
 					if cont != -1 {
-						s.CamelResponse(conn, camel)
+						CamelResponse(conn, camel)
 					}
 					// считаем пока буффер больше пакета
 					if cont < 1 {
@@ -163,12 +153,12 @@ func (s *Server) CamelHandler(conn *Listener) {
 					}
 				}
 			case io.EOF:
-				s.listeners.DeleteCloseConn(conn.Server)
+				list_listener.DeleteCloseConn(conn.Server)
 				conn.Close()
 				LogChannel <- LogStruct{"INFO", conn.RemoteAddr().String() + ": connection close"}
 				return
 			case os.ErrDeadlineExceeded:
-				s.listeners.DeleteCloseConn(conn.Server)
+				list_listener.DeleteCloseConn(conn.Server)
 				conn.Close()
 				LogChannel <- LogStruct{"INFO", conn.RemoteAddr().String() + ": connection close(ErrDeadlineExceeded1)"}
 				return
@@ -184,8 +174,8 @@ func (s *Server) CamelHandler(conn *Listener) {
 
 // Основной обработчик входящего трафика
 // После стандартных запросов идет переадресация на объявленную функции из основного потока
-//func CamelResponse(conn net.Conn, camel Camel_tcp) {
-func (s *Server) CamelResponse(conn *Listener, camel Camel_tcp) {
+// func CamelResponse(conn net.Conn, camel Camel_tcp) {
+func CamelResponse(conn *Listener, camel Camel_tcp) {
 	var camel_tmp Camel_tcp
 	var err error
 
@@ -198,13 +188,13 @@ func (s *Server) CamelResponse(conn *Listener, camel Camel_tcp) {
 			LogChannel <- LogStruct{"ERROR", err}
 		}
 		LogChannel <- LogStruct{"INFO", conn.RemoteAddr().String() + ": Initial SCP"}
-		s.listeners.SaveBRTIdConn(conn.Server, camel.Frame[0x0050].Param[0])
+		list_listener.SaveBRTIdConn(conn.Server, camel.Frame[0x0050].Param[0])
 	case camel.Type == TYPE_KEEPALIVE_RESP:
 		LogChannel <- LogStruct{"INFO", conn.RemoteAddr().String() + ": KeepAlive BRT <- SCP - OK"}
 	case camel.Type == TYPE_KEEPALIVE_REQ:
 		camel_tmp.Type = TYPE_KEEPALIVE_RESP
 		camel_tmp.Sequence = camel.Sequence
-		s.Sec = camel.Sequence
+		Sec = camel.Sequence
 		tmprw, _ := camel_tmp.Encoder()
 		if _, err = conn.WriteTo(tmprw); err != nil {
 			LogChannel <- LogStruct{"ERROR", err}
@@ -213,7 +203,7 @@ func (s *Server) CamelResponse(conn *Listener, camel Camel_tcp) {
 	default:
 		// Вызов основного обработчика из основного кода
 		// Запись ошибок, можно сделать экспериент, с передачей на уровень выше
-		s.cfg.ResponseFunc(conn, camel)
+		cfg.ResponseFunc(conn, camel)
 	}
 }
 
@@ -253,7 +243,7 @@ func LogWriteForGoRutine(text chan LogStruct) {
 	}
 }
 
-func (s *Server) ServerStop() {
+func ServerStop() {
 	LogChannel <- LogStruct{"INFO", "Stoping CAMEL SCP"}
-	s.ln.Close()
+	ln.Close()
 }

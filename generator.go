@@ -85,16 +85,15 @@ var (
 	CDRCamelResponseCount = data.NewCounters()
 
 	// Канал для Диметра коннект к БРТ и Camel
-	BrtDiamChannelAnswer = make(chan diam.Message, 2000)
-	BrtDiamChannel       = make(chan data.DiamCH, 2000)
+	BrtDiamChannelAnswer = make(chan diam.Message, 4000)
+	BrtDiamChannel       = make(chan data.DiamCH, 4000)
 	BrtOfflineCDR        = data.NewCDROffline()
 	CamelOfflineCDR      = data.NewCDROffline()
 
 	// Канал записи в Camel
-	CamelChannel  = make(chan tlv.Camel_tcp, 2000)
+	CamelChannel  = make(chan tlv.Camel_tcp, 4000)
 	list_listener *tlv.ListListener
-	camelserver   *tlv.Server
-	WriteChan     = make(chan tlv.WriteStruck, 2000)
+	WriteChan     = make(chan tlv.WriteStruck, 4000)
 
 	// Канал записи статистики в БД
 	ReportStat = make(chan string, 1000)
@@ -454,11 +453,12 @@ func StartFileCDR(task data.TasksType, InputString chan string) {
 	f, err := os.Create(strings.Replace(task.PathsToSave[0]+task.Template_save_file, "{date}", time.Now().Format("20060201030405"), 1))
 
 	if err != nil {
+		ProcessError(err)
 		if os.IsPermission(err) {
+			gostop = true
 			stop()
 			return
 		}
-		ProcessError(err)
 	}
 
 	ProcessDebug("Start write " + f.Name())
@@ -477,11 +477,12 @@ func StartFileCDR(task data.TasksType, InputString chan string) {
 			f, err = os.Create(strings.Replace(task.PathsToSave[DirNum]+task.Template_save_file, "{date}", time.Now().Format("20060201030405"), 1))
 
 			if err != nil {
+				ProcessError(err)
 				if os.IsPermission(err) {
+					gostop = true
 					stop()
 					return
 				}
-				ProcessError(err)
 			}
 
 			// Переместить в горутину
@@ -944,8 +945,8 @@ func StartCamelServer() {
 	ProcessInfo("Start SCP Server")
 
 	camel_cfg := &tlv.Config{
-		Camel_port: global_cfg.Common.CAMEL.Port,
-		//	Duration:         global_cfg.Common.Duration,
+		Camel_port:       global_cfg.Common.CAMEL.Port,
+		Duration:         global_cfg.Common.Duration,
 		Camel_SCP_id:     uint8(tlv.Stringtobyte(global_cfg.Common.CAMEL.Camel_SCP_id)[0]),
 		Camel_SMSAddress: global_cfg.Common.CAMEL.SMSCAddress,
 		XVLR:             global_cfg.Common.CAMEL.XVLR,
@@ -957,11 +958,9 @@ func StartCamelServer() {
 	}
 
 	list_listener = tlv.NewListListener()
-	camelserver = tlv.NewServer(camel_cfg, list_listener)
 
 	tlv.SetDebug(debugm)
-
-	go camelserver.ServerStart(ctx)
+	go tlv.ServerStart(camel_cfg, list_listener, ctx)
 	go CamelWrite(WriteChan)
 
 	// Ждем открытие хотя бы одного соединения
@@ -983,7 +982,7 @@ func CamelWrite(in chan tlv.WriteStruck) {
 			ProcessError(err)
 			if err == io.EOF {
 				tmp.C.Close()
-				tlv.DeleteCloseConn(tmp.C.Server, camelserver)
+				tlv.DeleteCloseConn(tmp.C.Server)
 				ProcessInfo(tmp.C.RemoteAddr().String() + ": connection close")
 				ProcessInfo("Close threads")
 			}
@@ -1049,7 +1048,7 @@ func CamelResponse() tlv.HandOK {
 				CDRCamelResponseCount.Inc(fmt.Sprint(int(camel.Frame[0x002C].Param[13])) + " SMS Charge 00")
 			} else {
 				camel_req := tlv.NewCamelTCP()
-				err = camel_req.EndSMS_req(camel.Frame[0x002C].Param, camelserver)
+				err = camel_req.EndSMS_req(camel.Frame[0x002C].Param)
 				if err != nil {
 					ProcessError(err)
 				}
@@ -1088,7 +1087,7 @@ func CamelResponse() tlv.HandOK {
 				CDRCamelResponseCount.Inc(fmt.Sprint(int(camel.Frame[0x002C].Param[13])) + " SMS Charge 00")
 			} else {
 				camel_req := tlv.NewCamelTCP()
-				err = camel_req.EndVoice_req(camel.Frame[0x002C].Param, camelserver)
+				err = camel_req.EndVoice_req(camel.Frame[0x002C].Param)
 				if err != nil {
 					ProcessError(err)
 				}
@@ -1176,7 +1175,7 @@ func CreateCamelMessage(rec data.RecTypePool, NameTask string, RecType data.RecT
 	dst := data.RandomMSISDN(NameTask)
 	lc := LACCELLpool[NameTask][rand.Intn(LACCELLlen[NameTask])]
 	if RecType.Record_type == "09" || RecType.Record_type == "08" {
-		sid, err := camel.AuthorizeSMS_req(rec.Msisdn, rec.IMSI, RecType.Record_type, dst, lc, camelserver)
+		sid, err := camel.AuthorizeSMS_req(rec.Msisdn, rec.IMSI, RecType.Record_type, dst, lc)
 
 		if err == nil {
 			CamelOfflineCDR.Store(string(sid), data.TypeBrtOfflineCdr{RecPool: rec,
@@ -1193,7 +1192,7 @@ func CreateCamelMessage(rec data.RecTypePool, NameTask string, RecType data.RecT
 			ProcessError(err)
 		}
 	} else if RecType.Record_type == "01" || RecType.Record_type == "02" {
-		sid, err := camel.AuthorizeVoice_req(rec.Msisdn, rec.IMSI, RecType.Record_type, dst, lc, camelserver)
+		sid, err := camel.AuthorizeVoice_req(rec.Msisdn, rec.IMSI, RecType.Record_type, dst, lc)
 
 		if err == nil {
 			CamelOfflineCDR.Store(string(sid), data.TypeBrtOfflineCdr{RecPool: rec,
@@ -1261,7 +1260,7 @@ func end() {
 
 	// Закрытие окрытого порта
 	if camel {
-		camelserver.ServerStop()
+		tlv.ServerStop()
 	}
 
 	// Задержка остановки, Ждем досылки ответов

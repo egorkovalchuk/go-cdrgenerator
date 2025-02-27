@@ -35,7 +35,7 @@ import (
 const (
 	logFileName = "generator.log"
 	pidFileName = "generator.pid"
-	versionutil = "0.5.3"
+	versionutil = "0.5.5"
 )
 
 var (
@@ -137,7 +137,7 @@ func main() {
 	} else if argument == "-s" {
 		err = pid.StopProcess(pidFileName)
 		if err != nil {
-			fmt.Println(err.Error)
+			fmt.Println(err.Error())
 		}
 		return
 	}

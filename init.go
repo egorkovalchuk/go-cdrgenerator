@@ -100,7 +100,7 @@ func InitVariables() {
 	}
 
 	// Обнуляем счетчик и инициализируем
-	for _, task := range global_cfg.Tasks {
+	for i, task := range global_cfg.Tasks {
 		// Иницмализация счетчика
 		CDRPerSec.Store(task.Name, 0)
 		CDRPerSecCamel.Store(task.Name, 0)
@@ -134,7 +134,7 @@ func InitVariables() {
 			CDRRecTypeCount.AddMap(task.Name, task.RecTypeRatio[i].Name, 0)
 		}
 		// Формируем задержку для равномерного формирования
-		task.Time_delay = 1000000 / task.CallsPerSecond
+		global_cfg.Tasks[i].Time_delay = 1000000 / task.CallsPerSecond
 	}
 
 	// Счетчик записи в БРТ

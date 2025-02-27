@@ -79,3 +79,9 @@ Fix context
 ## Vesion 0.5.2
 ### new fearure
 Add stop for linux
+## Vesion 0.5.4
+### new fearure
+TLV is implemented by the package
+### Fix Bug
+Fixed crash if there are not enough rights to write offline CDR
+Fixed crash if there are incorrect lines in the CSV Pool

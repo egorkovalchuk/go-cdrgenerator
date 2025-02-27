@@ -82,6 +82,8 @@ type TasksType struct {
 	DatapoolCsvLac string `json:"datapool_csv_lac"`
 	// временной лаг задерржки для равномерного формирования запросов
 	Time_delay int
+	// Переменная успешности закгрузки пула
+	Pool_loading bool
 }
 
 // Тип структуры описания логического вызова, сервис кодов
@@ -129,14 +131,35 @@ type TypeBrtOfflineCdr struct {
 
 // Пишем логи через горутину
 type LogStruct struct {
-	t    string
-	text interface{}
+	level string
+	text  interface{}
 }
 
 // Структура для хранения паттерна
 type CDRPatternType struct {
 	Pattern string
 	MsisdnB string
+}
+
+// Функция для проверки типов данных в строке
+func checkRowTypes(record []string) bool {
+	// Проверка первого поля msisdn
+	_, err := strconv.Atoi(record[0])
+	if err != nil {
+		return false
+	}
+
+	// Проверка первого поля imsi
+	_, err = strconv.Atoi(record[1])
+	if err != nil {
+		return false
+	}
+
+	if len(record[0]) != 10 || len(record[1]) != 15 {
+		return false
+	}
+
+	return true
 }
 
 func (cfg *Config) ReadConf(confname string) {
@@ -184,7 +207,7 @@ func HelpStart() {
 func (p PoolSubs) CreatePoolList(data [][]string, Task TasksType) PoolSubs {
 	var PoolList PoolSubs
 	for i, line := range data {
-		if i > 0 { // omit header line
+		if i > 0 && checkRowTypes(line) { // omit header line
 			var rec RecTypePool
 			rec.Msisdn = "7" + line[0]
 			rec.IMSI = line[1]

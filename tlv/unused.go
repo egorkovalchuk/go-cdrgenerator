@@ -6,13 +6,13 @@ import (
 )
 
 // Обработчик только на получение
-func CamelHandler1(conn *Listener) {
+func (s *Server) CamelHandler1(conn *Listener) {
 	defer conn.Close()
 	// Буффер обратоки большого количества сообщений
 	var buffer_tmp []byte
 	cont := 0
 
-	LogChannel <- LogStruct{"INFO", "Client connected from " + conn.RemoteAddr().String()}
+	LogMessage("INFO", "Client connected from "+conn.RemoteAddr().String())
 	timeoutDuration := 1 * time.Second
 	conn.SetReadDeadline(time.Now().Add(timeoutDuration))
 
@@ -29,11 +29,11 @@ func CamelHandler1(conn *Listener) {
 			for {
 				buffer_tmp, cont, err = camel.DecoderBuffer(buffer_tmp)
 				if err != nil {
-					LogChannel <- LogStruct{"ERROR", err}
+					LogMessage("ERROR", err)
 				}
 				// если посчитан пакет. то вызываем обработчик
 				if cont != -1 {
-					CamelResponse(conn, camel)
+					s.CamelResponse(conn, camel)
 				}
 				// считаем пока буффер больше пакета
 				if cont < 1 {
@@ -41,12 +41,12 @@ func CamelHandler1(conn *Listener) {
 				}
 			}
 		case io.EOF:
-			list_listener.DeleteCloseConn(conn.Server)
+			s.listeners.DeleteCloseConn(conn.Server)
 			conn.Close()
-			LogChannel <- LogStruct{"INFO", conn.RemoteAddr().String() + ": connection close"}
+			LogMessage("INFO", conn.RemoteAddr().String()+": connection close")
 			return
 		default:
-			LogChannel <- LogStruct{"ERROR", conn.RemoteAddr().String() + err.Error()}
+			LogMessage("ERROR", conn.RemoteAddr().String()+err.Error())
 			//return
 			//errors.Is(err, os.ErrDeadlineExceeded)
 			//if err, ok := err.(net.Error); ok && err.Timeout()

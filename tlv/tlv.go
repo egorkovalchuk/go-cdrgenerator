@@ -26,10 +26,6 @@ const (
 	LengthSizeParam = 2
 )
 
-var (
-	LocationMSCbase []byte
-)
-
 // Описание пареметров в пакете, Optional - является ли данный параметр обязательным
 type camel_param_desc struct {
 	Name     string
@@ -137,7 +133,7 @@ func (p *Camel_tcp) DecoderBuffer(r []byte) (t []byte, cont int, err error) {
 	i := int(p.LengthTCP)
 
 	// cont определяет размер соответствия буфера и пакета
-	// 1 больше декодируем камел пакет и возворащаем
+	// 1 больше декодируем камел пакет и возвращаем
 	// 0 равно просто декодируем
 	// -1 меньше - просто возвращаем остаток
 	switch {
@@ -278,15 +274,15 @@ func (p *Camel_tcp) LenghtTCP() (uint16, error) {
 	return uint16(tmp), nil
 }
 
-func (p *Camel_tcp) AuthorizeSMS_req(msisdn string, imsi string, ServiceCode string, msisdnB string, lc data.RecTypeLACPool) ([]byte, error) {
+func (p *Camel_tcp) AuthorizeSMS_req(msisdn string, imsi string, ServiceCode string, msisdnB string, lc data.RecTypeLACPool, s *Server) ([]byte, error) {
 	var err error
-	p.Sequence = Sec + uint32(1)
+	p.Sequence = s.Sec + uint32(1)
 	p.Type = TYPE_AUTHORIZESMS_REQ
 
 	//SessionID string О Идентификатор сессии
 	tmp := NewCamelTCPParam()
 	tmp.Tag = camel_params_map[0x002C].Tag
-	tmp.Param = NewCamelSessionID(msisdn, byte(0))
+	tmp.Param = NewCamelSessionID(msisdn, byte(0), s)
 	tmp.LengthParams = uint16(len(tmp.Param))
 	tmp.Type = camel_params_map[tmp.Tag].Type
 	p.Frame[tmp.Tag] = tmp
@@ -319,10 +315,10 @@ func (p *Camel_tcp) AuthorizeSMS_req(msisdn string, imsi string, ServiceCode str
 	p.Frame[tmp.Tag] = tmp
 
 	//SMSCAddressNumber
-	if cfg.Camel_SMSAddress != "" {
+	if s.cfg.Camel_SMSAddress != "" {
 		tmp = NewCamelTCPParam()
 		tmp.Tag = camel_params_map[0x002E].Tag
-		tmp.Param = []byte(cfg.Camel_SMSAddress)
+		tmp.Param = []byte(s.cfg.Camel_SMSAddress)
 		tmp.LengthParams = uint16(len(tmp.Param))
 		tmp.Type = camel_params_map[tmp.Tag].Type
 		p.Frame[tmp.Tag] = tmp
@@ -339,7 +335,7 @@ func (p *Camel_tcp) AuthorizeSMS_req(msisdn string, imsi string, ServiceCode str
 	//LocationInformationMSC
 	tmp = NewCamelTCPParam()
 	tmp.Tag = camel_params_map[0x0019].Tag
-	tmp.Param = LocationMSC(lc)
+	tmp.Param = s.LocationMSC(lc)
 	//tmp.Param = []byte{0xbf, 0x34, 0x0b, 0xa3, 0x09, 0x80, 0x07, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00}
 	tmp.LengthParams = uint16(len(tmp.Param))
 	tmp.Type = camel_params_map[tmp.Tag].Type
@@ -408,9 +404,9 @@ func (p *Camel_tcp) AuthorizeSMS_req(msisdn string, imsi string, ServiceCode str
 }
 
 // По умолчанию генератор отправляет что все СМС доставлены
-func (p *Camel_tcp) EndSMS_req(sid []byte) error {
+func (p *Camel_tcp) EndSMS_req(sid []byte, s *Server) error {
 	var err error
-	p.Sequence = Sec + uint32(1)
+	p.Sequence = s.Sec + uint32(1)
 	p.Type = TYPE_ENDSMS_REQ
 
 	//SessionID string О Идентификатор сессии
@@ -441,16 +437,16 @@ func (p *Camel_tcp) EndSMS_req(sid []byte) error {
 }
 
 // Авторизация Звонка
-func (p *Camel_tcp) AuthorizeVoice_req(msisdn string, imsi string, ServiceCode string, msisdnB string, lc data.RecTypeLACPool) ([]byte, error) {
+func (p *Camel_tcp) AuthorizeVoice_req(msisdn string, imsi string, ServiceCode string, msisdnB string, lc data.RecTypeLACPool, s *Server) ([]byte, error) {
 	var err error
 
-	p.Sequence = Sec + uint32(1)
+	p.Sequence = s.Sec + uint32(1)
 	p.Type = TYPE_AUTHORIZEVOICE_REQ
 
 	//SessionID string О Идентификатор сессии
 	tmp := NewCamelTCPParam()
 	tmp.Tag = camel_params_map[0x002C].Tag
-	tmp.Param = NewCamelSessionID(msisdn, byte(0))
+	tmp.Param = NewCamelSessionID(msisdn, byte(0), s)
 	tmp.LengthParams = uint16(len(tmp.Param))
 	tmp.Type = camel_params_map[tmp.Tag].Type
 	p.Frame[tmp.Tag] = tmp
@@ -570,7 +566,7 @@ func (p *Camel_tcp) AuthorizeVoice_req(msisdn string, imsi string, ServiceCode s
 	// Данные должны быть представлены в ASN.1 формате (Sequence представление из InitialDP) без распаковки со стороны SCP
 	tmp = NewCamelTCPParam()
 	tmp.Tag = camel_params_map[0x0018].Tag
-	tmp.Param = LocationMSC(lc)
+	tmp.Param = s.LocationMSC(lc)
 	//tmp.Param = []byte{0xbf, 0x34, 0x0b, 0xa3, 0x09, 0x80, 0x07, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00}
 	tmp.LengthParams = uint16(len(tmp.Param))
 	tmp.Type = camel_params_map[tmp.Tag].Type
@@ -600,9 +596,9 @@ func (p *Camel_tcp) AuthorizeVoice_req(msisdn string, imsi string, ServiceCode s
 }
 
 // По умолчанию генератор отправляет что голосовой вызов завершен
-func (p *Camel_tcp) EndVoice_req(sid []byte) error {
+func (p *Camel_tcp) EndVoice_req(sid []byte, s *Server) error {
 	var err error
-	p.Sequence = Sec + uint32(1)
+	p.Sequence = s.Sec + uint32(1)
 	p.Type = TYPE_ENDVOICE_REQ
 
 	//SessionID string О Идентификатор сессии
@@ -657,7 +653,7 @@ func (p *Camel_tcp) EndVoice_req(sid []byte) error {
 }
 
 // Получение нового значения сессии
-func NewCamelSessionID(MSCGT string, id byte) []byte {
+func NewCamelSessionID(MSCGT string, id byte, s *Server) []byte {
 	var tmp []byte
 	var err error
 	tmp = make([]byte, 16)
@@ -699,7 +695,7 @@ func NewCamelSessionID(MSCGT string, id byte) []byte {
 	tmp[8] = byte(t)
 
 	// SCP id
-	tmp[12] = cfg.Camel_SCP_id
+	tmp[12] = s.cfg.Camel_SCP_id
 	//ид BRT
 	tmp[13] = id
 	return tmp
@@ -791,10 +787,10 @@ func divmod(numerator, denominator int) (quotient, remainder int) {
 }
 
 // Location MSC
-func LocationMSC(lc data.RecTypeLACPool) []byte {
+func (s *Server) LocationMSC(lc data.RecTypeLACPool) []byte {
 
 	// Генерация Location MSC
-	buffer := LocationMSCbase
+	buffer := s.LocationMSCbase
 
 	tmp := binary.BigEndian.AppendUint16([]byte{}, uint16(lc.LAC))
 	buffer = append(buffer, tmp...)
@@ -806,34 +802,34 @@ func LocationMSC(lc data.RecTypeLACPool) []byte {
 	return buffer
 }
 
-func InitMSC() {
+func (s *Server) InitMSC() {
 
 	// Инициализация
 	// Определяем не меняющаяся часть LocationMSC
-	LocationMSCbase = append(LocationMSCbase, 0xa5) //Context, Constructed, 0x05
-	LocationMSCbase = append(LocationMSCbase, 0x00) //Длина, заменим в конце
+	s.LocationMSCbase = append(s.LocationMSCbase, 0xa5) //Context, Constructed, 0x05
+	s.LocationMSCbase = append(s.LocationMSCbase, 0x00) //Длина, заменим в конце
 
 	// Дочерние
 	// xVLR
-	LocationMSCbase = append(LocationMSCbase, 0x81) //Context, Primitive, 0x01
-	LocationMSCbase = append(LocationMSCbase, 0x07) //Длина
+	s.LocationMSCbase = append(s.LocationMSCbase, 0x81) //Context, Primitive, 0x01
+	s.LocationMSCbase = append(s.LocationMSCbase, 0x07) //Длина
 	//VLR Number
 	//1... .... = extension: noExtersion (0x01)
 	//.001 .... = natureOfAddressIndicator: International (0x01)
 	//.... 0001 = numberingPlanIndicator: ISDN(Telephony)NumberingPlan (0x01)
 	//ISDNString:79 28 99 00 09 1
-	tmp := Stringtobytereverse(cfg.XVLR)
-	LocationMSCbase = append(LocationMSCbase, 0x91) //Тип xVLR и его идентификатор
-	LocationMSCbase = append(LocationMSCbase, tmp...)
+	tmp := Stringtobytereverse(s.cfg.XVLR)
+	s.LocationMSCbase = append(s.LocationMSCbase, 0x91) //Тип xVLR и его идентификатор
+	s.LocationMSCbase = append(s.LocationMSCbase, tmp...)
 
 	//CellIDorLAI
-	LocationMSCbase = append(LocationMSCbase, 0xa3) //Context, Constructed, 0x03
-	LocationMSCbase = append(LocationMSCbase, 0x09) //Длина
-	LocationMSCbase = append(LocationMSCbase, 0x80) //Context, Primitive, 0x001
-	LocationMSCbase = append(LocationMSCbase, 0x07) //Длина
+	s.LocationMSCbase = append(s.LocationMSCbase, 0xa3) //Context, Constructed, 0x03
+	s.LocationMSCbase = append(s.LocationMSCbase, 0x09) //Длина
+	s.LocationMSCbase = append(s.LocationMSCbase, 0x80) //Context, Primitive, 0x001
+	s.LocationMSCbase = append(s.LocationMSCbase, 0x07) //Длина
 
-	tmp = Stringtobytereverse(cfg.ContryCode)
-	LocationMSCbase = append(LocationMSCbase, tmp...)
-	tmp = Stringtobytereverse(cfg.OperatorCode)
-	LocationMSCbase = append(LocationMSCbase, tmp...)
+	tmp = Stringtobytereverse(s.cfg.ContryCode)
+	s.LocationMSCbase = append(s.LocationMSCbase, tmp...)
+	tmp = Stringtobytereverse(s.cfg.OperatorCode)
+	s.LocationMSCbase = append(s.LocationMSCbase, tmp...)
 }

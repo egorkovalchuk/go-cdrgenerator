@@ -14,17 +14,8 @@ import (
 )
 
 type LogStruct struct {
-	t    string
-	text interface{}
-}
-
-// Просто запись в лог
-func LogWrite(err error) {
-	if startdaemon {
-		ProcessError(err)
-	} else {
-		fmt.Println(err)
-	}
+	level string
+	text  interface{}
 }
 
 // Запись ошибок из горутин
@@ -32,7 +23,7 @@ func LogWrite(err error) {
 func LogWriteForGoRutineStruct(err chan LogStruct) {
 	for i := range err {
 		datetime := time.Now().Local().Format("2006/01/02 15:04:05")
-		log.SetPrefix(datetime + " " + i.t + ": ")
+		log.SetPrefix(datetime + " " + i.level + ": ")
 		log.SetFlags(0)
 		log.Println(i.text)
 		log.SetPrefix("")

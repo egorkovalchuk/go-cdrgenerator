@@ -58,7 +58,7 @@ var (
 
 	// Каналы для управления и передачи информации
 	ProcessChannel = make(chan string)
-	LogChannel     = make(chan LogStruct)
+	LogChannel     = make(chan LogStruct, 1000)
 
 	// Признак запуска дополнительного потока
 	Flag = data.NewFlag()
@@ -93,6 +93,7 @@ var (
 	// Канал записи в Camel
 	CamelChannel  = make(chan tlv.Camel_tcp, 4000)
 	list_listener *tlv.ListListener
+	camelserver   *tlv.Server
 	WriteChan     = make(chan tlv.WriteStruck, 4000)
 
 	// Канал записи статистики в БД
@@ -218,8 +219,6 @@ func main() {
 		StartSimpleMode()
 	}
 	fmt.Println("Done")
-	return
-
 }
 
 // StartSimpleMode запуск в режиме скрипта
@@ -233,7 +232,7 @@ func StartSimpleMode() {
 	StartClient()
 
 	// Основной цикл
-	for _, thread := range global_cfg.Tasks {
+	for i, thread := range global_cfg.Tasks {
 		if thread.DatapoolCsvFile == "" {
 			ProcessWarm("Please, set the file name specified for " + thread.Name)
 		} else {
@@ -243,7 +242,7 @@ func StartSimpleMode() {
 				ProcessError("Thread " + thread.Name + " not start")
 			} else {
 				defer f.Close()
-				ProcessDebug("Start load" + thread.DatapoolCsvFile)
+				ProcessInfo("Start load pool " + thread.DatapoolCsvFile)
 
 				// read csv values using csv.Reader
 				csvReader := csv.NewReader(f)
@@ -257,11 +256,16 @@ func StartSimpleMode() {
 
 				if err != nil {
 					ProcessError(err)
+				} else if len(PoolList) == 0 {
+					ProcessError("Pool empty. Skeep")
 				} else {
 					ProcessDebug("Last record ")
 					ProcessDebug(PoolList[len(PoolList)-1])
 
 					ProcessInfo("Load " + strconv.Itoa(len(PoolList)) + " records")
+
+					// Включаем вывод статистики
+					global_cfg.Tasks[i].Pool_loading = true
 
 					if camel {
 						go StartTaskCamel(PoolList, thread, true)
@@ -314,41 +318,43 @@ func Monitor() {
 			return
 		case <-heartbeat:
 			for _, thread := range global_cfg.Tasks {
-				CDR = CDRPerSec.Load(thread.Name)
-				ProcessDebug("Speed task " + thread.Name + " " + strconv.Itoa(CDR) + " op/s")
-				if camel {
-					CDRCamel = CDRPerSecCamel.Load(thread.Name)
-					ProcessDebug("Speed camel task " + thread.Name + " " + strconv.Itoa(CDRCamel) + " op/s")
-				}
-				if brt && brtlist.Get(thread.Name) {
-					CDRDiam = CDRPerSecDiam.Load(thread.Name)
-					ProcessDebug("Speed Diameter task " + thread.Name + " " + strconv.Itoa(CDRDiam) + " op/s")
-				}
-				// вынести отдельно? что бы уменьшить выполнения условий
-				if global_cfg.Common.Report.Influx {
-					ReportStat <- "cdr_offline,region=" + global_cfg.Common.Report.Region + ",task_name=" + thread.Name + " speed=" + strconv.Itoa(CDR)
+				if thread.Pool_loading {
+					CDR = CDRPerSec.Load(thread.Name)
+					ProcessDebug("Speed task " + thread.Name + " " + strconv.Itoa(CDR) + " op/s")
 					if camel {
-						ReportStat <- "cdr_camel,region=" + global_cfg.Common.Report.Region + ",task_name=" + thread.Name + " speed=" + strconv.Itoa(CDRCamel)
+						CDRCamel = CDRPerSecCamel.Load(thread.Name)
+						ProcessDebug("Speed camel task " + thread.Name + " " + strconv.Itoa(CDRCamel) + " op/s")
 					}
 					if brt && brtlist.Get(thread.Name) {
-						ReportStat <- "cdr_brt,region=" + global_cfg.Common.Report.Region + ",task_name=" + thread.Name + " speed=" + strconv.Itoa(CDRDiam)
+						CDRDiam = CDRPerSecDiam.Load(thread.Name)
+						ProcessDebug("Speed Diameter task " + thread.Name + " " + strconv.Itoa(CDRDiam) + " op/s")
 					}
-				}
+					// вынести отдельно? что бы уменьшить выполнения условий
+					if global_cfg.Common.Report.Influx {
+						ReportStat <- "cdr_offline,region=" + global_cfg.Common.Report.Region + ",task_name=" + thread.Name + " speed=" + strconv.Itoa(CDR)
+						if camel {
+							ReportStat <- "cdr_camel,region=" + global_cfg.Common.Report.Region + ",task_name=" + thread.Name + " speed=" + strconv.Itoa(CDRCamel)
+						}
+						if brt && brtlist.Get(thread.Name) {
+							ReportStat <- "cdr_brt,region=" + global_cfg.Common.Report.Region + ",task_name=" + thread.Name + " speed=" + strconv.Itoa(CDRDiam)
+						}
+					}
 
-				if CDR < thread.CallsPerSecond {
-					// запускаем еще один поток если только 10 секунд подряд скорость была ниже
-					if checkstart > 10 {
-						Flag.Store(thread.Name, 1)
+					if CDR < thread.CallsPerSecond {
+						// запускаем еще один поток если только 10 секунд подряд скорость была ниже
+						if checkstart > 10 {
+							Flag.Store(thread.Name, 1)
+							checkstart = 0
+						}
+						checkstart++
+					} else {
 						checkstart = 0
 					}
-					checkstart++
-				} else {
-					checkstart = 0
+					CDRRecCount.IncN(thread.Name, CDR)
+					CDRPerSec.Store(thread.Name, 0)
+					CDRPerSecCamel.Store(thread.Name, 0)
+					CDRPerSecDiam.Store(thread.Name, 0)
 				}
-				CDRRecCount.IncN(thread.Name, CDR)
-				CDRPerSec.Store(thread.Name, 0)
-				CDRPerSecCamel.Store(thread.Name, 0)
-				CDRPerSecDiam.Store(thread.Name, 0)
 			}
 		case <-heartbeat10:
 			ProcessInfo("10 second generator statistics")
@@ -802,7 +808,7 @@ func StartDaemonMode() {
 	StartClient()
 
 	// Основной цикл
-	for _, thread := range global_cfg.Tasks {
+	for i, thread := range global_cfg.Tasks {
 		if thread.DatapoolCsvFile == "" {
 			ProcessWarm("Please, set the file name specified for " + thread.Name)
 		} else {
@@ -812,7 +818,7 @@ func StartDaemonMode() {
 				ProcessError("Thread " + thread.Name + " not start")
 			} else {
 				defer f.Close()
-				ProcessDebug("Start load" + thread.DatapoolCsvFile)
+				ProcessInfo("Start load pool " + thread.DatapoolCsvFile)
 
 				// read csv values using csv.Reader
 				csvReader := csv.NewReader(f)
@@ -826,11 +832,16 @@ func StartDaemonMode() {
 
 				if err != nil {
 					ProcessError(err)
+				} else if len(PoolList) == 0 {
+					ProcessError("Pool empty. Skeep")
 				} else {
 					ProcessDebug("Last record ")
 					ProcessDebug(PoolList[len(PoolList)-1])
 
 					ProcessInfo("Load " + strconv.Itoa(len(PoolList)) + " records")
+
+					// Включаем вывод статистики
+					global_cfg.Tasks[i].Pool_loading = true
 
 					// Запис формируются в том числе для роуминга
 					// Пока ограничено только локальными
@@ -945,8 +956,8 @@ func StartCamelServer() {
 	ProcessInfo("Start SCP Server")
 
 	camel_cfg := &tlv.Config{
-		Camel_port:       global_cfg.Common.CAMEL.Port,
-		Duration:         global_cfg.Common.Duration,
+		Camel_port: global_cfg.Common.CAMEL.Port,
+		//	Duration:         global_cfg.Common.Duration,
 		Camel_SCP_id:     uint8(tlv.Stringtobyte(global_cfg.Common.CAMEL.Camel_SCP_id)[0]),
 		Camel_SMSAddress: global_cfg.Common.CAMEL.SMSCAddress,
 		XVLR:             global_cfg.Common.CAMEL.XVLR,
@@ -958,10 +969,12 @@ func StartCamelServer() {
 	}
 
 	list_listener = tlv.NewListListener()
+	camelserver = tlv.NewServer(camel_cfg, list_listener)
 
 	tlv.SetDebug(debugm)
-	go tlv.ServerStart(camel_cfg, list_listener, ctx)
-	go CamelWrite(WriteChan)
+
+	go camelserver.ServerStart(ctx)
+	go CamelWriteGorutine(WriteChan)
 
 	// Ждем открытие хотя бы одного соединения
 	// Потоки дочерних поднимаются листенером
@@ -976,18 +989,33 @@ func StartCamelServer() {
 
 // Горутина записи в поток Camel
 // Эксперимент
-func CamelWrite(in chan tlv.WriteStruck) {
+func CamelWriteGorutine(in chan tlv.WriteStruck) {
 	for tmp := range in {
 		if _, err = tmp.C.WriteTo(tmp.B); err != nil {
 			ProcessError(err)
 			if err == io.EOF {
 				tmp.C.Close()
-				tlv.DeleteCloseConn(tmp.C.Server)
+				tlv.DeleteCloseConn(tmp.C.Server, camelserver)
 				ProcessInfo(tmp.C.RemoteAddr().String() + ": connection close")
 				ProcessInfo("Close threads")
 			}
 		}
 	}
+}
+
+// Отправка сообщений
+func CamelWrite(C *tlv.Listener, B []byte) {
+	if _, err = C.WriteTo(B); err != nil {
+		ProcessError(err)
+		if err == io.EOF {
+			C.Close()
+			tlv.DeleteCloseConn(C.Server, camelserver)
+			ProcessInfo(C.RemoteAddr().String() + ": connection close")
+			ProcessInfo("Close threads")
+		}
+	}
+	//
+	// CamelWrite(C,B)
 }
 
 // Горутина записи сообщения по Camel
@@ -998,20 +1026,8 @@ func CamelSend() tlv.HandReq {
 			// Прописываем id BRT
 			tmprw.Frame[0x002C].Param[13] = c.BRTId
 			tmp, _ := tmprw.Encoder()
-			WriteChan <- tlv.WriteStruck{C: c, B: tmp}
+			CamelWrite(c, tmp)
 			CDRCamelCount.Inc(c.RemoteAddr().String())
-			/*if _, err = c.WriteTo(tmp); err != nil {
-				ProcessError(err)
-				if err == io.EOF {
-					c.Close()
-					tlv.DeleteCloseConn(c.Server)
-					ProcessInfo(c.RemoteAddr().String() + ": connection close")
-					ProcessInfo("Close threads")
-					return
-				}
-			} else {
-				CDRCamelCount.Inc(c.RemoteAddr().String())
-			}*/
 		}
 	}
 }
@@ -1048,7 +1064,7 @@ func CamelResponse() tlv.HandOK {
 				CDRCamelResponseCount.Inc(fmt.Sprint(int(camel.Frame[0x002C].Param[13])) + " SMS Charge 00")
 			} else {
 				camel_req := tlv.NewCamelTCP()
-				err = camel_req.EndSMS_req(camel.Frame[0x002C].Param)
+				err = camel_req.EndSMS_req(camel.Frame[0x002C].Param, camelserver)
 				if err != nil {
 					ProcessError(err)
 				}
@@ -1056,16 +1072,7 @@ func CamelResponse() tlv.HandOK {
 				if err != nil {
 					ProcessError(err)
 				}
-				/*if _, err = c.WriteTo(tmprw); err != nil {
-					ProcessError(err)
-					if err == io.EOF {
-						c.Close()
-						tlv.DeleteCloseConn(c.Server)
-						ProcessInfo(c.RemoteAddr().String() + ": connection close")
-						return
-					}
-				}*/
-				WriteChan <- tlv.WriteStruck{C: c, B: tmprw}
+				CamelWrite(c, tmprw)
 				CDRCamelResponseCount.Inc(fmt.Sprint(int(camel.Frame[0x002C].Param[13])) + " CONFIRM SMS")
 			}
 		case camel.Type == tlv.TYPE_ENDSMS_RESP:
@@ -1087,7 +1094,7 @@ func CamelResponse() tlv.HandOK {
 				CDRCamelResponseCount.Inc(fmt.Sprint(int(camel.Frame[0x002C].Param[13])) + " SMS Charge 00")
 			} else {
 				camel_req := tlv.NewCamelTCP()
-				err = camel_req.EndVoice_req(camel.Frame[0x002C].Param)
+				err = camel_req.EndVoice_req(camel.Frame[0x002C].Param, camelserver)
 				if err != nil {
 					ProcessError(err)
 				}
@@ -1095,16 +1102,7 @@ func CamelResponse() tlv.HandOK {
 				if err != nil {
 					ProcessError(err)
 				}
-				/*if _, err = c.WriteTo(tmprw); err != nil {
-					ProcessError(err)
-					if err == io.EOF {
-						c.Close()
-						tlv.DeleteCloseConn(c.Server)
-						ProcessInfo(c.RemoteAddr().String() + ": connection close")
-						return
-					}
-				}*/
-				WriteChan <- tlv.WriteStruck{C: c, B: tmprw}
+				CamelWrite(c, tmprw)
 				CDRCamelResponseCount.Inc(fmt.Sprint(int(camel.Frame[0x002C].Param[13])) + " CONFIRM VOICE")
 			}
 		case camel.Type == tlv.TYPE_ENDVOICE_RESP:
@@ -1175,7 +1173,7 @@ func CreateCamelMessage(rec data.RecTypePool, NameTask string, RecType data.RecT
 	dst := data.RandomMSISDN(NameTask)
 	lc := LACCELLpool[NameTask][rand.Intn(LACCELLlen[NameTask])]
 	if RecType.Record_type == "09" || RecType.Record_type == "08" {
-		sid, err := camel.AuthorizeSMS_req(rec.Msisdn, rec.IMSI, RecType.Record_type, dst, lc)
+		sid, err := camel.AuthorizeSMS_req(rec.Msisdn, rec.IMSI, RecType.Record_type, dst, lc, camelserver)
 
 		if err == nil {
 			CamelOfflineCDR.Store(string(sid), data.TypeBrtOfflineCdr{RecPool: rec,
@@ -1192,7 +1190,7 @@ func CreateCamelMessage(rec data.RecTypePool, NameTask string, RecType data.RecT
 			ProcessError(err)
 		}
 	} else if RecType.Record_type == "01" || RecType.Record_type == "02" {
-		sid, err := camel.AuthorizeVoice_req(rec.Msisdn, rec.IMSI, RecType.Record_type, dst, lc)
+		sid, err := camel.AuthorizeVoice_req(rec.Msisdn, rec.IMSI, RecType.Record_type, dst, lc, camelserver)
 
 		if err == nil {
 			CamelOfflineCDR.Store(string(sid), data.TypeBrtOfflineCdr{RecPool: rec,
@@ -1235,7 +1233,6 @@ func StartClient() {
 		// Запуск потока Camel
 		// Горутина запускается из функции, по количеству серверов и потоков
 		StartCamelServer()
-
 	}
 }
 
@@ -1260,7 +1257,7 @@ func end() {
 
 	// Закрытие окрытого порта
 	if camel {
-		tlv.ServerStop()
+		camelserver.ServerStop()
 	}
 
 	// Задержка остановки, Ждем досылки ответов

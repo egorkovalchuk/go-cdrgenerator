@@ -105,9 +105,9 @@ func (p *Listener) WriteChannel(in chan []byte, s *Server) {
 }
 
 func (p *Listener) Read(tmpwr []byte) (n int, err error) {
-	p.mx.RLock()
+	//	p.mx.Lock()
 	n, err = p.Server.Read(tmpwr)
-	p.mx.RUnlock()
+	//	p.mx.Unlock()
 	return
 }
 

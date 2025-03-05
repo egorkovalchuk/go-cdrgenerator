@@ -2,6 +2,7 @@ package tlv
 
 import (
 	"context"
+	"encoding/binary"
 	"io"
 	"log"
 	"net"
@@ -109,61 +110,80 @@ func (s *Server) CamelHandler(conn *Listener) {
 
 	// Буффер обратоки большого количества сообщений
 	var buffer_tmp []byte
-	cont := 0
+	var err error
+	// cont := 0
 
 	// Запускаем цикл
 	for {
 		select {
 		case <-heartbeat.C:
-			// conn.SetReadDeadline(time.Now().Add(timeoutDuration))
 			s.sendKeepAlive(conn)
 		default:
-			// message_io := bufio.NewScanner(conn).Bytes()
-			// Буффер это хорошо, но может переполнятся
-			// по идее надо вычитывать пакеты с учетом длины
 			conn.SetReadDeadline(time.Now().Add(timeoutDuration))
 			// conn.SetReadDeadline(time.Time{})
-			buff := make([]byte, 16048)
-			n, err := conn.Read(buff)
-
-			switch err {
-			case nil:
-				//message_io := buff[0:n]
-				camel := NewCamelTCP()
-				//buffer_tmp = append(buffer_tmp, message_io...)
-				buffer_tmp = append(buffer_tmp, buff[:n]...)
-				for {
-					buffer_tmp, cont, err = camel.DecoderBuffer(buffer_tmp)
-					if err != nil {
-						LogMessage("ERROR", err)
-					}
-					// если посчитан пакет. то вызываем обработчик
-					if cont != -1 {
-						s.CamelResponse(conn, camel)
-					}
-					// считаем пока буффер больше пакета
-					if cont < 1 {
-						break
-					}
-				}
-			case io.EOF:
-				s.listeners.DeleteCloseConn(conn.Server)
-				conn.Close()
-				LogMessage("INFO", conn.RemoteAddr().String()+": connection close")
+			buffer_tmp, err = s.readNetConn(conn, buffer_tmp)
+			// err = s.readNetConnLenght(conn)
+			if err != nil {
 				return
-			case os.ErrDeadlineExceeded:
-				s.listeners.DeleteCloseConn(conn.Server)
-				conn.Close()
-				LogMessage("INFO", conn.RemoteAddr().String()+": connection close(ErrDeadlineExceeded1)")
-				return
-			default:
-				LogMessage("ERROR", conn.RemoteAddr().String()+err.Error())
-				//return
-				// Сделфать закрытие коннекта  горутины
-				//read tcp 127.0.0.1:4868->127.0.0.1:64556: i/o timeout
 			}
 		}
 	}
+}
+
+// Функция чтения из буфера
+func (s *Server) readNetConn(conn *Listener, buffer_tmp []byte) ([]byte, error) {
+	// message_io := bufio.NewScanner(conn).Bytes()
+	// Буффер это хорошо, но может переполнятся
+	// по идее надо вычитывать пакеты с учетом длины
+	cont := 0
+	buff := make([]byte, 16048)
+	n, err := conn.Read(buff)
+
+	if err != nil {
+		return buffer_tmp, s.handleReadError(conn, err)
+	}
+
+	camel := NewCamelTCP()
+	buffer_tmp = append(buffer_tmp, buff[:n]...)
+
+	for {
+		buffer_tmp, cont, err = camel.DecoderBuffer(buffer_tmp)
+		if err != nil {
+			LogMessage("ERROR", err)
+		}
+		// если посчитан пакет. то вызываем обработчик
+		if cont != -1 {
+			s.CamelResponse(conn, camel)
+		}
+		// считаем пока буффер больше пакета
+		if cont < 1 {
+			break
+		}
+	}
+
+	return buffer_tmp, nil
+}
+
+// handleReadError обрабатывает ошибки чтения.
+func (s *Server) handleReadError(conn *Listener, err error) error {
+	switch err {
+	case io.EOF:
+		conn.Close()
+		s.listeners.DeleteCloseConn(conn.Server)
+		LogMessage("INFO", conn.RemoteAddr().String()+": connection close")
+		return err
+	case os.ErrDeadlineExceeded:
+		conn.Close()
+		s.listeners.DeleteCloseConn(conn.Server)
+		LogMessage("INFO", conn.RemoteAddr().String()+": connection close (ErrDeadlineExceeded)")
+		return err
+	default:
+		LogMessage("ERROR", conn.RemoteAddr().String()+": "+err.Error())
+		//return
+		// Сделфать закрытие коннекта  горутины
+		//read tcp 127.0.0.1:4868->127.0.0.1:64556: i/o timeout
+	}
+	return nil
 }
 
 // sendKeepAlive отправляет KeepAlive-сообщение.
@@ -263,4 +283,30 @@ func (s *Server) ServerStop() {
 // logMessage отправляет сообщение в лог.
 func LogMessage(level string, message interface{}) {
 	LogChannel <- LogStruct{level, message}
+}
+
+// Функция чтения из буфера
+// Эксперимент
+func (s *Server) readNetConnLenght(conn *Listener) error {
+	header := make([]byte, 2)
+	_, err := io.ReadFull(conn.Server, header)
+	if err != nil {
+		return s.handleReadError(conn, err)
+	}
+
+	length := binary.BigEndian.Uint16(header)
+
+	value := make([]byte, length)
+	_, err = io.ReadFull(conn.Server, value)
+	if err != nil {
+		return s.handleReadError(conn, err)
+	}
+
+	camel := NewCamelTCP()
+	_, _, err = camel.DecoderBuffer(value)
+	if err != nil {
+		LogMessage("ERROR", err)
+	}
+	s.CamelResponse(conn, camel)
+	return nil
 }

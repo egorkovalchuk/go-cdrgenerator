@@ -19,8 +19,9 @@ import (
 	"context"
 
 	"github.com/egorkovalchuk/go-cdrgenerator/data"
-	"github.com/egorkovalchuk/go-cdrgenerator/pid"
-	"github.com/egorkovalchuk/go-cdrgenerator/tlv"
+	"github.com/egorkovalchuk/go-cdrgenerator/pkg/influx"
+	"github.com/egorkovalchuk/go-cdrgenerator/pkg/pid"
+	"github.com/egorkovalchuk/go-cdrgenerator/pkg/tlv"
 	"github.com/fiorix/go-diameter/v4/diam"
 	"github.com/fiorix/go-diameter/v4/diam/avp"
 	"github.com/fiorix/go-diameter/v4/diam/datatype"
@@ -207,7 +208,16 @@ func main() {
 	// Запуск статистики
 	// как переопределить монитор?
 	if global_cfg.Common.Report.Influx {
-		go data.StartWriteInflux(global_cfg.Common, ProcessInflux, ReportStat)
+
+		w := influx.NewInfluxWriter(&influx.Config{
+			InfluxToken:   global_cfg.Common.Report.InfluxToken,
+			InfluxOrg:     global_cfg.Common.Report.InfluxOrg,
+			InfluxVersion: global_cfg.Common.Report.InfluxVersion,
+			InfluxBucket:  global_cfg.Common.Report.InfluxBucket,
+			InfluxServer:  global_cfg.Common.Report.InfluxServer,
+		}, ProcessInflux)
+		// Запуск горутины записи в инфлюкс
+		w.StartHTTPWriter(ReportStat)
 	}
 
 	// Определяем ветку
@@ -699,28 +709,30 @@ func DiamAnswer(f chan diam.Message) {
 // f chan<- diam.Message
 func AnswerCCAEvent() diam.HandlerFunc {
 	return func(c diam.Conn, m *diam.Message) {
-		// Конкуренция по ответам, запись в фаил?
-		s, sid := data.ResponseDiamHandler(m, ProcessDiam, debugm)
-		CDRDiamResponseCount.Inc(strconv.Itoa(s))
-		CDRDiamRCount.Inc(c.RemoteAddr().String())
-		if s == 4011 || s == 4522 || s == 4012 {
-			//logdiam.Println("DIAM: Answer CCA code: " + strconv.Itoa(s) + " Session: " + sid)
-			//переход в оффлайн
-			val := BrtOfflineCDR.Load(sid) //BrtOfflineCDR[sid]*
-			rr, err := data.CreateCDRRecord(val.RecPool, val.CDRtime, val.Ratio, CDRPatternTask[val.TaskName], val.DstMsisdn, data.RecTypeLACPool{LAC: val.Lac, CELL: val.Cell})
-			if err != nil {
-				ProcessError(err)
+		go func() {
+			// Конкуренция по ответам, запись в фаил?
+			s, sid := data.ResponseDiamHandler(m, ProcessDiam, debugm)
+			CDRDiamResponseCount.Inc(strconv.Itoa(s))
+			CDRDiamRCount.Inc(c.RemoteAddr().String())
+			if s == 4011 || s == 4522 || s == 4012 {
+				//logdiam.Println("DIAM: Answer CCA code: " + strconv.Itoa(s) + " Session: " + sid)
+				//переход в оффлайн
+				val := BrtOfflineCDR.Load(sid) //BrtOfflineCDR[sid]*
+				rr, err := data.CreateCDRRecord(val.RecPool, val.CDRtime, val.Ratio, CDRPatternTask[val.TaskName], val.DstMsisdn, data.RecTypeLACPool{LAC: val.Lac, CELL: val.Cell})
+				if err != nil {
+					ProcessError(err)
+				} else {
+					CDRChanneltoFileUni[val.TaskName] <- rr
+				}
+				BrtOfflineCDR.Delete(sid)
+			} else if s == 5030 {
+				// 5030 пользователь не известен
+				BrtOfflineCDR.Delete(sid)
 			} else {
-				CDRChanneltoFileUni[val.TaskName] <- rr
+				//logdiam.Println("DIAM: Answer CCA code: " + strconv.Itoa(s))
+				BrtOfflineCDR.Delete(sid)
 			}
-			BrtOfflineCDR.Delete(sid)
-		} else if s == 5030 {
-			// 5030 пользователь не известен
-			BrtOfflineCDR.Delete(sid)
-		} else {
-			//logdiam.Println("DIAM: Answer CCA code: " + strconv.Itoa(s))
-			BrtOfflineCDR.Delete(sid)
-		}
+		}()
 	}
 }
 

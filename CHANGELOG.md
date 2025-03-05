@@ -85,3 +85,6 @@ TLV is implemented by the package
 ### Fix Bug
 Fixed crash if there are not enough rights to write offline CDR
 Fixed crash if there are incorrect lines in the CSV Pool
+## Vesion 0.5.5
+### new fearure
+InfluxDB is implemented by the package

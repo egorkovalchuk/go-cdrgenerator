@@ -35,6 +35,7 @@ func NewInfluxWriter(cfg *Config, logFunc func(interface{})) *InfluxWriter {
 // StartHTTPWriter запускает горутину для записи через HTTP
 func (w *InfluxWriter) StartHTTPWriter(input <-chan string) {
 	go func() {
+		w.logFunc("Start InfluxDB writer")
 		request := w.prepareHTTPRequest()
 
 		if request == "" {
@@ -53,6 +54,7 @@ func (w *InfluxWriter) StartHTTPWriter(input <-chan string) {
 // StartUDPWriter запускает горутину для записи через UDP
 func (w *InfluxWriter) StartUDPWriter(input <-chan string) {
 	go func() {
+		w.logFunc("Start InfluxDB writer")
 		conn, err := w.newUDPClient()
 		if err != nil {
 			w.logFunc(err)

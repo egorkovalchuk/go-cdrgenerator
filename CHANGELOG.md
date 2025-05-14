@@ -88,3 +88,7 @@ Fixed crash if there are incorrect lines in the CSV Pool
 ## Vesion 0.5.5
 ### new fearure
 InfluxDB is implemented by the package
+## Vesion 0.5.6
+### new fearure
+### Fix Bug
+Added handler for closing a network connection from the client side

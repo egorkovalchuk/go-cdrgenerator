@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/egorkovalchuk/go-cdrgenerator/data"
+	"github.com/egorkovalchuk/go-cdrgenerator/pkg/data"
 )
 
 const (

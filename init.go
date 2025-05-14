@@ -9,7 +9,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/egorkovalchuk/go-cdrgenerator/data"
+	"github.com/egorkovalchuk/go-cdrgenerator/pkg/data"
+	"github.com/egorkovalchuk/go-cdrgenerator/pkg/diameter"
 	"github.com/fiorix/go-diameter/v4/diam"
 )
 
@@ -116,7 +117,7 @@ func InitVariables() {
 
 		//Добавлено для тестов, по идее использовать CDRChanneltoBRTUni
 		BrtDiamChannelAnswer = make(chan diam.Message, 1000)
-		BrtDiamChannel = make(chan data.DiamCH, 1000)
+		BrtDiamChannel = make(chan diameter.DiamCH, 1000)
 
 		// Заполнение интервалов для радндомайзера
 		// Инициализация среза для полсчета типов

@@ -2,10 +2,12 @@ package main
 
 import (
 	"encoding/csv"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"log"
@@ -18,7 +20,8 @@ import (
 
 	"context"
 
-	"github.com/egorkovalchuk/go-cdrgenerator/data"
+	"github.com/egorkovalchuk/go-cdrgenerator/pkg/data"
+	"github.com/egorkovalchuk/go-cdrgenerator/pkg/diameter"
 	"github.com/egorkovalchuk/go-cdrgenerator/pkg/influx"
 	"github.com/egorkovalchuk/go-cdrgenerator/pkg/pid"
 	"github.com/egorkovalchuk/go-cdrgenerator/pkg/tlv"
@@ -36,7 +39,7 @@ import (
 const (
 	logFileName = "generator.log"
 	pidFileName = "generator.pid"
-	versionutil = "0.5.5"
+	versionutil = "0.5.6"
 )
 
 var (
@@ -87,7 +90,7 @@ var (
 
 	// Канал для Диметра коннект к БРТ и Camel
 	BrtDiamChannelAnswer = make(chan diam.Message, 4000)
-	BrtDiamChannel       = make(chan data.DiamCH, 4000)
+	BrtDiamChannel       = make(chan diameter.DiamCH, 4000)
 	BrtOfflineCDR        = data.NewCDROffline()
 	CamelOfflineCDR      = data.NewCDROffline()
 
@@ -116,7 +119,9 @@ var (
 	// Разрешить запускать дочернии процессы
 	thread_secodary bool
 
-	// тест
+	wg sync.WaitGroup
+
+	// контексты
 	ctx  context.Context
 	stop context.CancelFunc
 )
@@ -615,7 +620,7 @@ func StartDiameterClient() {
 	diam_cfg := &sm.Settings{
 		OriginHost:       datatype.DiameterIdentity(global_cfg.Common.BRT_OriginHost),
 		OriginRealm:      datatype.DiameterIdentity(global_cfg.Common.BRT_OriginRealm),
-		VendorID:         data.PETER_SERVICE_VENDOR_ID,
+		VendorID:         diameter.PETER_SERVICE_VENDOR_ID,
 		ProductName:      "CDR-generator",
 		OriginStateID:    datatype.Unsigned32(time.Now().Unix()),
 		FirmwareRevision: 1,
@@ -630,7 +635,7 @@ func StartDiameterClient() {
 	ProcessDebug("Load Diameter client")
 
 	// Инициализация конфига клиента
-	cli := data.Client(mux)
+	cli := diameter.Client(mux)
 
 	// Set message handlers.
 	// Можно использовать канал AnswerCCAEvent(BrtDiamChannelAnswer)
@@ -682,7 +687,7 @@ func Dial(cli *sm.Client, addr, cert, key string, ssl bool, networkType string) 
 // Тест горутина обработки ответов диаметра
 func DiamAnswer(f chan diam.Message) {
 	for m := range f {
-		s, sid := data.ResponseDiamHandler(&m, ProcessDiam, debugm)
+		s, sid := diameter.ResponseDiamHandler(&m, ProcessDiam, debugm)
 		CDRDiamResponseCount.Inc(strconv.Itoa(s))
 		if s == 4011 || s == 4522 || s == 4012 {
 			//logdiam.Println("DIAM: Answer CCA code: " + strconv.Itoa(s) + " Session: " + sid)
@@ -711,7 +716,7 @@ func AnswerCCAEvent() diam.HandlerFunc {
 	return func(c diam.Conn, m *diam.Message) {
 		go func() {
 			// Конкуренция по ответам, запись в фаил?
-			s, sid := data.ResponseDiamHandler(m, ProcessDiam, debugm)
+			s, sid := diameter.ResponseDiamHandler(m, ProcessDiam, debugm)
 			CDRDiamResponseCount.Inc(strconv.Itoa(s))
 			CDRDiamRCount.Inc(c.RemoteAddr().String())
 			if s == 4011 || s == 4522 || s == 4012 {
@@ -739,7 +744,7 @@ func AnswerCCAEvent() diam.HandlerFunc {
 func AnswerDWAEvent() diam.HandlerFunc {
 	return func(c diam.Conn, m *diam.Message) {
 		//обработчик ошибок, вотч дог пишем в обычный лог
-		s, _ := data.ResponseDiamHandler(m, ProcessDiam, debugm)
+		s, _ := diameter.ResponseDiamHandler(m, ProcessDiam, debugm)
 		ProcessDiam("Answer " + c.RemoteAddr().String() + " DWA code:" + strconv.Itoa(s))
 	}
 }
@@ -751,7 +756,7 @@ func AnswerALLEvent() diam.HandlerFunc {
 }
 
 // Горутина  записи сообщения по диаметру в брт
-func SendCCREvent(c diam.Conn, cfg *sm.Settings, in chan data.DiamCH) {
+func SendCCREvent(c diam.Conn, cfg *sm.Settings, in chan diameter.DiamCH) {
 
 	var err error
 	server, _, _ := strings.Cut(c.RemoteAddr().String(), ":")
@@ -773,6 +778,7 @@ func SendCCREvent(c diam.Conn, cfg *sm.Settings, in chan data.DiamCH) {
 			if !ok {
 				ProcessDiam("Client connection does not contain metadata")
 				ProcessDiam("Close threads")
+
 			}
 
 			// Настройка Watch Dog
@@ -986,7 +992,9 @@ func StartCamelServer() {
 	tlv.SetDebug(debugm)
 
 	go camelserver.ServerStart(ctx)
-	go CamelWriteGorutine(WriteChan)
+	// Запуск для эксперимента
+	//go CamelWriteGorutine(WriteChan)
+	//
 
 	// Ждем открытие хотя бы одного соединения
 	// Потоки дочерних поднимаются листенером
@@ -1011,6 +1019,12 @@ func CamelWriteGorutine(in chan tlv.WriteStruck) {
 				ProcessInfo(tmp.C.RemoteAddr().String() + ": connection close")
 				ProcessInfo("Close threads")
 			}
+			if errors.Is(err, net.ErrClosed) {
+				tmp.C.Close()
+				tlv.DeleteCloseConn(tmp.C.Server, camelserver)
+				ProcessInfo(tmp.C.RemoteAddr().String() + ": connection close")
+				ProcessInfo("Close threads")
+			}
 		}
 	}
 }
@@ -1025,9 +1039,13 @@ func CamelWrite(C *tlv.Listener, B []byte) {
 			ProcessInfo(C.RemoteAddr().String() + ": connection close")
 			ProcessInfo("Close threads")
 		}
+		if errors.Is(err, net.ErrClosed) {
+			C.Close()
+			tlv.DeleteCloseConn(C.Server, camelserver)
+			ProcessInfo(C.RemoteAddr().String() + ": connection close")
+			ProcessInfo("Close threads")
+		}
 	}
-	//
-	// CamelWrite(C,B)
 }
 
 // Горутина записи сообщения по Camel
@@ -1143,7 +1161,7 @@ func CamelResponse() tlv.HandOK {
 // Вынесено отдельно для удобства
 // Функция отправки диаметр сообщения
 func CreateDiamMessage(rec data.RecTypePool, NameTask string, RecType data.RecTypeRatioType) {
-	diam_message, sid, err := data.CreateCCREventMessage(rec, time.Now(), RecType, dict.Default)
+	diam_message, sid, err := diameter.CreateCCREventMessage(rec, time.Now(), RecType, dict.Default)
 	// Все сообщения добавляются в массив
 	// после получения кода 4011 формируется оффлайн CDR
 	// Надо понять что передается в интернет сессии к качестве абонента B
@@ -1171,7 +1189,7 @@ func CreateDiamMessage(rec data.RecTypePool, NameTask string, RecType data.RecTy
 			DstMsisdn: dst,
 			Lac:       lc.LAC,
 			Cell:      lc.CELL})
-		BrtDiamChannel <- data.DiamCH{TaskName: NameTask, Message: diam_message}
+		BrtDiamChannel <- diameter.DiamCH{TaskName: NameTask, Message: diam_message}
 		//Для БРТ считаем здесь. Пока здесь, похоже фаил пишется дольше
 		CDRPerSec.Inc(NameTask)
 		CDRPerSecDiam.Inc(NameTask)

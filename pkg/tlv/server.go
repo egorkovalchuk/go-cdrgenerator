@@ -177,6 +177,11 @@ func (s *Server) handleReadError(conn *Listener, err error) error {
 		s.listeners.DeleteCloseConn(conn.Server)
 		LogMessage("INFO", conn.RemoteAddr().String()+": connection close (ErrDeadlineExceeded)")
 		return err
+	case net.ErrClosed:
+		conn.Close()
+		s.listeners.DeleteCloseConn(conn.Server)
+		LogMessage("INFO", conn.RemoteAddr().String()+": connection close (net.ErrClosed)")
+		return err
 	default:
 		LogMessage("ERROR", conn.RemoteAddr().String()+": "+err.Error())
 		//return
@@ -229,6 +234,22 @@ func (s *Server) CamelResponse(conn *Listener, camel Camel_tcp) {
 			LogMessage("ERROR", err)
 		}
 		LogMessage("INFO", conn.RemoteAddr().String()+": KeepAlive BRT -> SCP")
+	case TYPE_SHUTDOWN_REQ:
+		camel_tmp.Type = TYPE_SHUTDOWN_RESP
+		camel_tmp.Sequence = camel.Sequence
+		tmp := NewCamelTCPParam()
+		tmp.Tag = camel_params_map[0x0013].Tag
+		tmp.Param = []byte{0, 0, 0, 0}
+		tmp.LengthParams = uint16(camel_params_map[0x0013].MaxLen)
+		tmp.Type = camel_params_map[tmp.Tag].Type
+		camel_tmp.Frame[tmp.Tag] = tmp
+		tmprw, _ := camel_tmp.Encoder()
+		if _, err = conn.WriteTo(tmprw); err != nil {
+			LogMessage("ERROR", err)
+		}
+		conn.Close()
+		s.listeners.DeleteCloseConn(conn.Server)
+		LogMessage("INFO", conn.RemoteAddr().String()+": connection close")
 	default:
 		// Вызов основного обработчика из основного кода
 		// Запись ошибок, можно сделать экспериент, с передачей на уровень выше

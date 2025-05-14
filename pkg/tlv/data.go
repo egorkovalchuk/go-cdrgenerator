@@ -25,10 +25,6 @@ type Listener struct {
 	Address net.Addr
 	BRTId   byte
 	mx      sync.RWMutex
-
-	// Эксперимент
-	// возможно из-за блокировок может тормозить
-	WriteChan chan []byte
 }
 
 // Пишем логи через горутину

@@ -1,4 +1,4 @@
-package data
+package diameter
 
 import (
 	"errors"
@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/egorkovalchuk/go-cdrgenerator/pkg/data"
 
 	"github.com/fiorix/go-diameter/v4/diam"
 	"github.com/fiorix/go-diameter/v4/diam/avp"
@@ -347,7 +349,7 @@ func Client(mux *sm.StateMachine) *sm.Client {
 }
 
 // Формирование сообщения
-func CreateCCREventMessage(Msisdn RecTypePool, date time.Time, RecordType RecTypeRatioType, dict *dict.Parser) (*diam.Message, string, error) {
+func CreateCCREventMessage(Msisdn data.RecTypePool, date time.Time, RecordType data.RecTypeRatioType, dict *dict.Parser) (*diam.Message, string, error) {
 	// Описание что добавить RatingGroup - может быть списком
 
 	sid := "session;" + strconv.Itoa(int(rand.Uint32()))

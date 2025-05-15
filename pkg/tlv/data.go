@@ -1,6 +1,7 @@
 package tlv
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -25,6 +26,8 @@ type Listener struct {
 	Address net.Addr
 	BRTId   byte
 	mx      sync.RWMutex
+	Ctx     context.Context
+	cancel  context.CancelFunc
 }
 
 // Пишем логи через горутину
@@ -70,10 +73,11 @@ type HandOK func(*Listener, Camel_tcp)
 type HandReq func(*Listener, chan Camel_tcp)
 
 // Конструктор для открытого соединения
-func NewListener(conn net.Conn) *Listener {
+func NewListener(conn net.Conn, ctx context.Context) *Listener {
 	s := &Listener{}
 	s.Server = conn
 	s.Address = conn.LocalAddr()
+	s.Ctx, s.cancel = context.WithCancel(ctx)
 	return s
 }
 
@@ -101,26 +105,35 @@ func (p *Listener) WriteChannel(in chan []byte, s *Server) {
 }
 
 func (p *Listener) Read(tmpwr []byte) (n int, err error) {
-	//	p.mx.Lock()
 	n, err = p.Server.Read(tmpwr)
-	//	p.mx.Unlock()
 	return
 }
 
 func (p *Listener) Close() {
 	p.Server.Close()
+	p.Stop()
 }
 
 func (p *Listener) SetReadDeadline(t time.Time) (err error) {
-	p.mx.Lock()
+	// p.mx.Lock()
 	err = p.Server.SetReadDeadline(t)
-	p.mx.Unlock()
+	// p.mx.Unlock()
 	return
 }
 
 func (p *Listener) RemoteAddr() net.Addr {
 	t := p.Server.RemoteAddr()
 	return t
+}
+
+// Выключение контекста, для выключения горутин
+func (p *Listener) Stop() {
+	p.mx.Lock()
+	defer p.mx.Unlock()
+	if p.cancel != nil {
+		p.cancel()
+		p.cancel = nil // Чтобы нельзя было отменить дважды
+	}
 }
 
 func NewListenerMap() map[string]Listener {
@@ -134,17 +147,17 @@ func NewListListener() *ListListener {
 	}
 }
 
-func (c *ListListener) SaveOpenConn(value net.Conn) {
-	c.List[value.RemoteAddr().String()] = NewListener(value)
+func (c *ListListener) SaveOpenConn(value net.Conn, ctx context.Context) {
+	c.List[value.RemoteAddr().String()] = NewListener(value, ctx)
 	if debug {
-		LogChannel <- LogStruct{"DEBUG", "Count CAMEL connection " + fmt.Sprint(len(c.List))}
+		LogChannel <- LogStruct{"DEBUG", "Add: Count CAMEL connection " + fmt.Sprint(len(c.List))}
 	}
 }
 
 func (c *ListListener) DeleteCloseConn(value net.Conn) {
 	delete(c.List, value.RemoteAddr().String())
 	if debug {
-		LogChannel <- LogStruct{"DEBUG", "Count CAMEL connection " + fmt.Sprint(len(c.List))}
+		LogChannel <- LogStruct{"DEBUG", "Delete: Count CAMEL connection " + fmt.Sprint(len(c.List))}
 	}
 }
 

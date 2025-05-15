@@ -82,12 +82,12 @@ func (s *Server) ServerStart(ctx context.Context) {
 				LogMessage("ERROR", err)
 				return
 			}
-			s.listeners.SaveOpenConn(conn)
+			s.listeners.SaveOpenConn(conn, ctx)
 			// Запуск Обработчика
 			go s.CamelHandler(s.listeners.List[conn.RemoteAddr().String()])
 			// Запуск Отправки
-			// Сделать канал только для этого потока?
-			go s.cfg.RequestFunc(s.listeners.List[conn.RemoteAddr().String()], s.cfg.CamelChannel)
+			// Запуск потока только после инициализации перенесено в CamelResponse
+			// go s.cfg.RequestFunc(s.listeners.List[conn.RemoteAddr().String()], s.cfg.CamelChannel)
 			if debug {
 				LogMessage("DEBUG", "Local address "+conn.LocalAddr().String())
 				LogMessage("DEBUG", "Remote address "+conn.RemoteAddr().String())
@@ -118,6 +118,8 @@ func (s *Server) CamelHandler(conn *Listener) {
 		select {
 		case <-heartbeat.C:
 			s.sendKeepAlive(conn)
+		case <-conn.Ctx.Done():
+			return
 		default:
 			conn.SetReadDeadline(time.Now().Add(timeoutDuration))
 			// conn.SetReadDeadline(time.Time{})
@@ -184,9 +186,6 @@ func (s *Server) handleReadError(conn *Listener, err error) error {
 		return err
 	default:
 		LogMessage("ERROR", conn.RemoteAddr().String()+": "+err.Error())
-		//return
-		// Сделфать закрытие коннекта  горутины
-		//read tcp 127.0.0.1:4868->127.0.0.1:64556: i/o timeout
 	}
 	return nil
 }
@@ -223,6 +222,10 @@ func (s *Server) CamelResponse(conn *Listener, camel Camel_tcp) {
 		}
 		LogMessage("INFO", conn.RemoteAddr().String()+": Initial SCP")
 		s.listeners.SaveBRTIdConn(conn.Server, camel.Frame[0x0050].Param[0])
+		// Запуск Отправки
+		// Запуск потока только после инициализации
+		LogMessage("INFO", conn.RemoteAddr().String()+": Starting a data transfer stream")
+		go s.cfg.RequestFunc(s.listeners.List[conn.RemoteAddr().String()], s.cfg.CamelChannel)
 	case TYPE_KEEPALIVE_RESP:
 		LogMessage("INFO", conn.RemoteAddr().String()+": KeepAlive BRT <- SCP - OK")
 	case TYPE_KEEPALIVE_REQ:

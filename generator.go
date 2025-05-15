@@ -653,7 +653,7 @@ func StartDiameterClient() {
 		ProcessDebug(init_connect)
 		var err error
 
-		brt_connect, err := Dial(cli, init_connect+":"+strconv.Itoa(global_cfg.Common.BRT_port), "", "", false, "tcp")
+		brt_connect, err := diameter.Dial(cli, init_connect+":"+strconv.Itoa(global_cfg.Common.BRT_port), "", "", false, "tcp")
 
 		if err != nil {
 			ProcessError("Connect error ")
@@ -663,7 +663,7 @@ func StartDiameterClient() {
 			// Запуск потоков записи по БРТ
 			// Отмеаем что клиент запущен
 			chk++
-			go SendCCREvent(brt_connect, diam_cfg, BrtDiamChannel)
+			go SendCCREvent(brt_connect, diam_cfg, cli, BrtDiamChannel)
 		}
 	}
 	// Проверка что клиент запущен
@@ -673,15 +673,6 @@ func StartDiameterClient() {
 		ProcessDiam("Stopping the client's diameter. No connection is initialized")
 		brt = false
 	}
-}
-
-// Кусок для диаметра
-// Определение шифрование соединения
-func Dial(cli *sm.Client, addr, cert, key string, ssl bool, networkType string) (diam.Conn, error) {
-	if ssl {
-		return cli.DialNetworkTLS(networkType, addr, cert, key, nil)
-	}
-	return cli.DialNetwork(networkType, addr)
 }
 
 // Тест горутина обработки ответов диаметра
@@ -756,7 +747,7 @@ func AnswerALLEvent() diam.HandlerFunc {
 }
 
 // Горутина  записи сообщения по диаметру в брт
-func SendCCREvent(c diam.Conn, cfg *sm.Settings, in chan diameter.DiamCH) {
+func SendCCREvent(c diam.Conn, cfg *sm.Settings, cli *sm.Client, in chan diameter.DiamCH) {
 
 	var err error
 	server, _, _ := strings.Cut(c.RemoteAddr().String(), ":")
@@ -767,18 +758,26 @@ func SendCCREvent(c diam.Conn, cfg *sm.Settings, in chan diameter.DiamCH) {
 	_, ok := smpeer.FromContext(c.Context())
 	if !ok {
 		ProcessDiam("Client connection does not contain metadata")
-		ProcessDiam("Close threads")
 	}
 
 	for {
 		select {
+		case <-ctx.Done():
+			ProcessInfo("Stop diameter client " + server)
+			return
+		case <-c.(diam.CloseNotifier).CloseNotify():
+			cc := diameter.Reconnect(cli, c.RemoteAddr().String(), ProcessDiam)
+			if cc != nil {
+				c = cc
+			} else {
+				ProcessInfo("End diameter CCR Event gorutine for " + server)
+				return
+			}
 		case <-heartbeat:
 			// Сделать выход или переоткрытие?
 			_, ok := smpeer.FromContext(c.Context())
 			if !ok {
 				ProcessDiam("Client connection does not contain metadata")
-				ProcessDiam("Close threads")
-
 			}
 
 			// Настройка Watch Dog
@@ -796,7 +795,6 @@ func SendCCREvent(c diam.Conn, cfg *sm.Settings, in chan diameter.DiamCH) {
 			meta, ok := smpeer.FromContext(c.Context())
 			if !ok {
 				ProcessDiam("Client connection does not contain metadata")
-				ProcessDiam("Close threads")
 			}
 
 			diam_message := tmp.Message
@@ -1013,13 +1011,7 @@ func CamelWriteGorutine(in chan tlv.WriteStruck) {
 	for tmp := range in {
 		if _, err = tmp.C.WriteTo(tmp.B); err != nil {
 			ProcessError(err)
-			if err == io.EOF {
-				tmp.C.Close()
-				tlv.DeleteCloseConn(tmp.C.Server, camelserver)
-				ProcessInfo(tmp.C.RemoteAddr().String() + ": connection close")
-				ProcessInfo("Close threads")
-			}
-			if errors.Is(err, net.ErrClosed) {
+			if err == io.EOF || errors.Is(err, net.ErrClosed) {
 				tmp.C.Close()
 				tlv.DeleteCloseConn(tmp.C.Server, camelserver)
 				ProcessInfo(tmp.C.RemoteAddr().String() + ": connection close")
@@ -1033,13 +1025,7 @@ func CamelWriteGorutine(in chan tlv.WriteStruck) {
 func CamelWrite(C *tlv.Listener, B []byte) {
 	if _, err = C.WriteTo(B); err != nil {
 		ProcessError(err)
-		if err == io.EOF {
-			C.Close()
-			tlv.DeleteCloseConn(C.Server, camelserver)
-			ProcessInfo(C.RemoteAddr().String() + ": connection close")
-			ProcessInfo("Close threads")
-		}
-		if errors.Is(err, net.ErrClosed) {
+		if err == io.EOF || errors.Is(err, net.ErrClosed) {
 			C.Close()
 			tlv.DeleteCloseConn(C.Server, camelserver)
 			ProcessInfo(C.RemoteAddr().String() + ": connection close")
@@ -1052,12 +1038,22 @@ func CamelWrite(C *tlv.Listener, B []byte) {
 // Автоматически прописывается brt_id в зависимости от запущенных горутин CamelSend
 func CamelSend() tlv.HandReq {
 	return func(c *tlv.Listener, in chan tlv.Camel_tcp) {
-		for tmprw := range in {
-			// Прописываем id BRT
-			tmprw.Frame[0x002C].Param[13] = c.BRTId
-			tmp, _ := tmprw.Encoder()
-			CamelWrite(c, tmp)
-			CDRCamelCount.Inc(c.RemoteAddr().String())
+		for {
+			select {
+			case <-c.Ctx.Done():
+				ProcessDebug("Close context. End gorutine for " + c.RemoteAddr().String())
+				return
+			case tmprw, ok := <-in:
+				if !ok {
+					ProcessDebug("Close channel. End gorutine for " + c.RemoteAddr().String())
+					return
+				}
+				// Прописываем id BRT
+				tmprw.Frame[0x002C].Param[13] = c.BRTId
+				tmp, _ := tmprw.Encoder()
+				CamelWrite(c, tmp)
+				CDRCamelCount.Inc(c.RemoteAddr().String())
+			}
 		}
 	}
 }

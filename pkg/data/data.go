@@ -543,7 +543,7 @@ func RandomMSISDN(tsk string) string {
 		}
 
 		// Форматируем номер в международном формате
-		return "+7" + prefix + number
+		return "7" + prefix + number
 	}
 
 }

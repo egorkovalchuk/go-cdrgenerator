@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os/signal"
-	"sync"
 	"syscall"
 
 	"log"
@@ -119,7 +118,7 @@ var (
 	// Разрешить запускать дочернии процессы
 	thread_secodary bool
 
-	wg sync.WaitGroup
+	wgd data.CheckedWaitGroup
 
 	// контексты
 	ctx  context.Context
@@ -611,8 +610,6 @@ func StartDiameterClient() {
 		brt_adress = append(brt_adress, datatype.Address(net.ParseIP(ip)))
 	}
 	brt_adress = append(brt_adress, datatype.Address(net.ParseIP(localip)))
-	// счетчик активных соединений
-	chk := 0
 
 	//прописываем конфиг
 	ProcessDebug("Load Diameter config")
@@ -662,12 +659,12 @@ func StartDiameterClient() {
 			ProcessDebug("Connect to " + init_connect + " done.")
 			// Запуск потоков записи по БРТ
 			// Отмеаем что клиент запущен
-			chk++
+			wgd.Add(1)
 			go SendCCREvent(brt_connect, diam_cfg, cli, BrtDiamChannel)
 		}
 	}
 	// Проверка что клиент запущен
-	if chk > 0 {
+	if wgd.ExpectAtLeast(0) {
 		ProcessDiam("Done. Sending messages...")
 	} else {
 		ProcessDiam("Stopping the client's diameter. No connection is initialized")
@@ -766,9 +763,11 @@ func SendCCREvent(c diam.Conn, cfg *sm.Settings, cli *sm.Client, in chan diamete
 			ProcessInfo("Stop diameter client " + server)
 			return
 		case <-c.(diam.CloseNotifier).CloseNotify():
+			wgd.Done()
 			cc := diameter.Reconnect(cli, c.RemoteAddr().String(), ProcessDiam)
 			if cc != nil {
 				c = cc
+				wgd.Add(1)
 			} else {
 				ProcessInfo("End diameter CCR Event gorutine for " + server)
 				return
@@ -938,12 +937,12 @@ func StartTaskCamel(PoolList data.PoolSubs, cfg data.TasksType, FirstStart bool)
 					}
 
 					switch {
-					case cfg.RecTypeRatio[RecTypeIndex].DefaultChan == "camel":
+					case cfg.RecTypeRatio[RecTypeIndex].DefaultChan == "camel" && len(list_listener.List) > 0:
 						if slow_camel {
 							time.Sleep(time.Duration(10) * time.Second)
 						}
 						CreateCamelMessage(PoolList[PoolIndex], cfg.Name, cfg.RecTypeRatio[RecTypeIndex])
-					case cfg.RecTypeRatio[RecTypeIndex].DefaultChan == "diameter" && ll:
+					case cfg.RecTypeRatio[RecTypeIndex].DefaultChan == "diameter" && ll && wgd.ExpectAtLeast(0):
 						CreateDiamMessage(PoolList[PoolIndex], cfg.Name, cfg.RecTypeRatio[RecTypeIndex])
 					default:
 						rr, err := data.CreateCDRRecord(PoolList[PoolIndex], time.Now(), cfg.RecTypeRatio[RecTypeIndex], CDRPatternTask[cfg.Name], data.RandomMSISDN(cfg.Name), LACCELLpool[cfg.Name][rand.Intn(LACCELLlen[cfg.Name])])

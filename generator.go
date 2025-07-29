@@ -9,7 +9,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"log"
 	"math/rand"
 	"net"
 	"os"
@@ -161,17 +160,6 @@ func main() {
 	flag.BoolVar(&slow_camel, "slow_camel", false, "Start with slow_camel mode")
 	flag.Parse()
 
-	// Открытие лог файла
-	// ротация не поддерживается в текущей версии
-	// Вынести в горутину
-	filer, err := os.OpenFile(logFileName, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0666)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer filer.Close()
-
-	log.SetOutput(filer)
-
 	// запуск горутины записи в лог
 	go LogWriteForGoRutineStruct(LogChannel)
 
@@ -318,7 +306,7 @@ func Monitor() {
 	var CDR int
 	var CDRCamel int
 	var CDRDiam int
-	var checkstart int
+	checkstart := data.NewCounters()
 
 	tmpCamel := make(map[string]int)
 	tmpDiam := make(map[string]int)
@@ -356,13 +344,13 @@ func Monitor() {
 
 					if CDR < thread.CallsPerSecond {
 						// запускаем еще один поток если только 10 секунд подряд скорость была ниже
-						if checkstart > 10 {
+						if checkstart.Load(thread.Name) > 10 {
 							Flag.Store(thread.Name, 1)
-							checkstart = 0
+							checkstart.Store(thread.Name, 0)
 						}
-						checkstart++
+						checkstart.Inc(thread.Name)
 					} else {
-						checkstart = 0
+						checkstart.Store(thread.Name, 0)
 					}
 					CDRRecCount.IncN(thread.Name, CDR)
 					CDRPerSec.Store(thread.Name, 0)

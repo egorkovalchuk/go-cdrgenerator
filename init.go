@@ -21,14 +21,22 @@ type LogStruct struct {
 
 // Запись ошибок из горутин
 // можно добавить ротейт по дате + архив в отдельном потоке
-func LogWriteForGoRutineStruct(err chan LogStruct) {
-	for i := range err {
-		datetime := time.Now().Local().Format("2006/01/02 15:04:05")
-		log.SetPrefix(datetime + " " + i.level + ": ")
-		log.SetFlags(0)
-		log.Println(i.text)
-		log.SetPrefix("")
-		log.SetFlags(log.Ldate | log.Ltime)
+func LogWriteForGoRutineStruct(logs chan LogStruct) {
+	// Открытие лог файла
+	// ротация не поддерживается в текущей версии
+	// Вынести в горутину
+	filer, err := os.OpenFile(logFileName, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0666)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer filer.Close()
+	logger := log.New(filer, "", 0) // Создаем отдельный логгер для файла
+
+	log.SetOutput(filer)
+	for entry := range logs {
+		prefix := time.Now().Local().Format("2006/01/02 15:04:05") + " " + entry.level + ": "
+		logger.SetPrefix(prefix)
+		logger.Println(entry.text)
 	}
 }
 

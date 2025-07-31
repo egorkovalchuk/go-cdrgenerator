@@ -102,4 +102,7 @@ Added offline CDR generation in the absence of an active connection
 
 Fixed generation of subscriber B
 
-Fixed error start new thread
+Fixed create new thread
+## Vesion 0.5.7
+### new fearure
+### Fix Bug

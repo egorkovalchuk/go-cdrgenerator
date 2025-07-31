@@ -90,8 +90,8 @@ func NewCamelTCPParam() Camel_tcp_param {
 func (p *Camel_tcp) Decoder(r []byte) error {
 	defer func() {
 		if c := recover(); c != nil {
-			LogChannel <- LogStruct{"INFO: Decoder", "Error TLV parsing"}
-			LogChannel <- LogStruct{"INFO: Decoder", r}
+			logs.ProcessInfo("Decoder Error TLV parsing")
+			logs.ProcessInfo("Decoder " + fmt.Sprint(r))
 		}
 	}()
 
@@ -114,9 +114,9 @@ func (p *Camel_tcp) Decoder(r []byte) error {
 func (p *Camel_tcp) DecoderBuffer(r []byte) (t []byte, cont int, err error) {
 	defer func() {
 		if c := recover(); c != nil {
-			LogChannel <- LogStruct{"INFO: DecoderBuffer", "Error TLV parsing"}
-			LogChannel <- LogStruct{"INFO: DecoderBuffer", r}
-			LogChannel <- LogStruct{"INFO: DecoderBuffer", c}
+			logs.ProcessInfo("DecoderBuffer Error TLV parsing")
+			logs.ProcessInfo("DecoderBuffer " + fmt.Sprint(r))
+			logs.ProcessInfo("DecoderBuffer " + fmt.Sprint(c))
 		}
 	}()
 
@@ -180,7 +180,7 @@ func (p *Camel_tcp) DecoderChunk(r []byte, n int) error {
 		return nil
 	}
 	if err != nil {
-		LogChannel <- LogStruct{"ERROR", err}
+		logs.ProcessError(err)
 		return err
 	}
 	return nil
@@ -215,7 +215,7 @@ func (p *Camel_tcp) Encoder() ([]byte, error) {
 	p.LengthTCP, err = p.LenghtTCP()
 
 	if err != nil {
-		LogChannel <- LogStruct{"INFO: ENCODER1", p}
+		logs.ProcessInfo("ENCODER1 " + fmt.Sprint(p))
 	}
 
 	var tmp []byte
@@ -254,7 +254,7 @@ func (p *Camel_tcp) Encoder() ([]byte, error) {
 	}
 
 	if err != nil {
-		LogChannel <- LogStruct{"ERROR", err}
+		logs.ProcessError(err)
 	}
 
 	return tmp, nil
@@ -664,17 +664,17 @@ func NewCamelSessionID(MSCGT string, id byte, s *Server) []byte {
 		if i < ln {
 			bit_left, err = strconv.Atoi(string(MSCGT[i*2]))
 			if err != nil {
-				LogChannel <- LogStruct{"ERROR: Stringtobytereverse", err}
+				logs.ProcessError("Stringtobytereverse " + err.Error())
 			}
 			bit_right, err = strconv.Atoi(string(MSCGT[i*2+1]))
 			if err != nil {
-				LogChannel <- LogStruct{"ERROR: NewSessionId", err}
+				logs.ProcessError("NewSessionId " + err.Error())
 			}
 		} else {
 			if parity != 0 && i == ln {
 				bit_left, err = strconv.Atoi(string(MSCGT[i*2]))
 				if err != nil {
-					LogChannel <- LogStruct{"ERROR: NewSessionId", err}
+					logs.ProcessError("NewSessionId " + err.Error())
 				}
 			} else {
 				bit_left = 15
@@ -714,11 +714,11 @@ func Stringtobytereverse(t string) []byte {
 		if i < ln {
 			bit_left, err = strconv.Atoi(string(t[i*2]))
 			if err != nil {
-				LogChannel <- LogStruct{"ERROR: Stringtobytereverse", err}
+				logs.ProcessError("Stringtobytereverse " + err.Error())
 			}
 			bit_right, err = strconv.Atoi(string(t[i*2+1]))
 			if err != nil {
-				LogChannel <- LogStruct{"ERROR: Stringtobytereverse", err}
+				logs.ProcessError("Stringtobytereverse " + err.Error())
 			}
 			bit_right = bit_right << 4
 			tt := bit_left + bit_right
@@ -727,7 +727,7 @@ func Stringtobytereverse(t string) []byte {
 			if parity != 0 && i == ln {
 				bit_left, err = strconv.Atoi(string(t[i*2]))
 				if err != nil {
-					LogChannel <- LogStruct{"ERROR: Stringtobytereverse", err}
+					logs.ProcessError("Stringtobytereverse " + err.Error())
 				}
 				bit_right = 15
 				bit_right = bit_right << 4
@@ -754,17 +754,17 @@ func Stringtobyte(t string) []byte {
 		if i < ln {
 			bit_left, err = strconv.Atoi(string(t[i*2]))
 			if err != nil {
-				LogChannel <- LogStruct{"ERROR: Stringtobytereverse", err}
+				logs.ProcessError("Stringtobytereverse " + err.Error())
 			}
 			bit_right, err = strconv.Atoi(string(t[i*2+1]))
 			if err != nil {
-				LogChannel <- LogStruct{"ERROR: Stringtobyte", err}
+				logs.ProcessError("Stringtobyte " + err.Error())
 			}
 		} else {
 			if parity != 0 && i == ln {
 				bit_left, err = strconv.Atoi(string(t[i*2]))
 				if err != nil {
-					LogChannel <- LogStruct{"ERROR: Stringtobyte", err}
+					logs.ProcessError("Stringtobyte " + fmt.Sprint(err))
 				}
 			} else {
 				bit_left = 15

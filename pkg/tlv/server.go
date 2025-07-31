@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
-	"log"
 	"net"
 	"os"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/egorkovalchuk/go-cdrgenerator/pkg/logger"
 )
 
 var (
@@ -17,10 +18,8 @@ var (
 	camel_params_map map[uint16]camel_param_desc
 	camel_type_map   map[string]camel_type_len
 
-	// Канал записи в лог
-	LogChannel = make(chan LogStruct, 1000)
-
 	loggerOnce sync.Once
+	logs       *logger.LogWriter
 )
 
 // Клиент. Не используем, так как являемся сервером
@@ -47,11 +46,12 @@ func NewServer(cfg *Config, listeners *ListListener) *Server {
 // SetDebug устанавливает режим отладки.
 func SetDebug(c bool) {
 	debug = c
+	logs.ChangeDebugLevel(debug)
 }
 
 func (s *Server) ServerStart(ctx context.Context) {
 
-	LogMessage("INFO", "Starting CAMEL SCP")
+	logs.ProcessInfo("Starting CAMEL SCP")
 	Init()
 	s.InitMSC()
 
@@ -60,7 +60,7 @@ func (s *Server) ServerStart(ctx context.Context) {
 	s.ln, err = net.Listen("tcp", ":"+strconv.Itoa(s.cfg.Camel_port))
 
 	if err != nil {
-		LogMessage("ERROR", err)
+		logs.ProcessError(err)
 		return
 	}
 	defer s.ln.Close()
@@ -68,7 +68,7 @@ func (s *Server) ServerStart(ctx context.Context) {
 	// Открываем портб занести в цикл для много поточной обработки
 	// задать ограничение по количеству открытых коннектов (через структуру)
 	// из цикла не работает
-	LogMessage("INFO", "Start schelduler")
+	logs.ProcessInfo("Start schelduler")
 
 	for {
 		select {
@@ -79,7 +79,7 @@ func (s *Server) ServerStart(ctx context.Context) {
 		default:
 			conn, err := s.ln.Accept()
 			if err != nil {
-				LogMessage("ERROR", err)
+				logs.ProcessError(err)
 				return
 			}
 			s.listeners.SaveOpenConn(conn, ctx)
@@ -88,10 +88,8 @@ func (s *Server) ServerStart(ctx context.Context) {
 			// Запуск Отправки
 			// Запуск потока только после инициализации перенесено в CamelResponse
 			// go s.cfg.RequestFunc(s.listeners.List[conn.RemoteAddr().String()], s.cfg.CamelChannel)
-			if debug {
-				LogMessage("DEBUG", "Local address "+conn.LocalAddr().String())
-				LogMessage("DEBUG", "Remote address "+conn.RemoteAddr().String())
-			}
+			logs.ProcessDebug("Local address " + conn.LocalAddr().String())
+			logs.ProcessDebug("Remote address " + conn.RemoteAddr().String())
 		}
 
 	}
@@ -102,7 +100,7 @@ func (s *Server) ServerStart(ctx context.Context) {
 func (s *Server) CamelHandler(conn *Listener) {
 	defer conn.Close()
 
-	LogMessage("INFO", "Client connected from  "+conn.RemoteAddr().String())
+	logs.ProcessInfo("Client connected from  " + conn.RemoteAddr().String())
 	// KeepAliveServer
 	heartbeat := time.NewTicker(20 * time.Second)
 	timeoutDuration := 2 * time.Second
@@ -151,7 +149,7 @@ func (s *Server) readNetConn(conn *Listener, buffer_tmp []byte) ([]byte, error) 
 	for {
 		buffer_tmp, cont, err = camel.DecoderBuffer(buffer_tmp)
 		if err != nil {
-			LogMessage("ERROR", err)
+			logs.ProcessError(err)
 		}
 		// если посчитан пакет. то вызываем обработчик
 		if cont != -1 {
@@ -172,35 +170,35 @@ func (s *Server) handleReadError(conn *Listener, err error) error {
 	case io.EOF:
 		conn.Close()
 		s.listeners.DeleteCloseConn(conn.Server)
-		LogMessage("INFO", conn.RemoteAddr().String()+": connection close")
+		logs.ProcessInfo(conn.RemoteAddr().String() + ": connection close")
 		return err
 	case os.ErrDeadlineExceeded:
 		conn.Close()
 		s.listeners.DeleteCloseConn(conn.Server)
-		LogMessage("INFO", conn.RemoteAddr().String()+": connection close (ErrDeadlineExceeded)")
+		logs.ProcessInfo(conn.RemoteAddr().String() + ": connection close (ErrDeadlineExceeded)")
 		return err
 	case net.ErrClosed:
 		conn.Close()
 		s.listeners.DeleteCloseConn(conn.Server)
-		LogMessage("INFO", conn.RemoteAddr().String()+": connection close (net.ErrClosed)")
+		logs.ProcessInfo(conn.RemoteAddr().String() + ": connection close (net.ErrClosed)")
 		return err
 	default:
-		LogMessage("ERROR", conn.RemoteAddr().String()+": "+err.Error())
+		logs.ProcessError(conn.RemoteAddr().String() + ": " + err.Error())
 	}
 	return nil
 }
 
 // sendKeepAlive отправляет KeepAlive-сообщение.
 func (s *Server) sendKeepAlive(conn *Listener) {
-	LogMessage("INFO", conn.RemoteAddr().String()+": KeepAlive")
+	logs.ProcessInfo(conn.RemoteAddr().String() + ": KeepAlive")
 	// Пока оставляю. но БРТ сам шлет KeepAlive
 	// Надо менять запрос
 	tmprw := []byte{0, 8, 0, 7, 0, 0, 0, 1}
 	if _, err := conn.WriteTo(tmprw); err != nil {
-		LogMessage("ERROR", err)
+		logs.ProcessError(err)
 		if err == io.EOF {
 			s.listeners.DeleteCloseConn(conn.Server)
-			LogMessage("INFO", conn.RemoteAddr().String()+": connection close")
+			logs.ProcessInfo(conn.RemoteAddr().String() + ": connection close")
 		}
 	}
 }
@@ -218,25 +216,25 @@ func (s *Server) CamelResponse(conn *Listener, camel Camel_tcp) {
 		camel_tmp.Sequence = camel.Sequence
 		tmprw, _ := camel_tmp.Encoder()
 		if _, err = conn.WriteTo(tmprw); err != nil {
-			LogMessage("ERROR", err)
+			logs.ProcessError(err)
 		}
-		LogMessage("INFO", conn.RemoteAddr().String()+": Initial SCP")
+		logs.ProcessInfo(conn.RemoteAddr().String() + ": Initial SCP")
 		s.listeners.SaveBRTIdConn(conn.Server, camel.Frame[0x0050].Param[0])
 		// Запуск Отправки
 		// Запуск потока только после инициализации
-		LogMessage("INFO", conn.RemoteAddr().String()+": Starting a data transfer stream")
+		logs.ProcessInfo(conn.RemoteAddr().String() + ": Starting a data transfer stream")
 		go s.cfg.RequestFunc(s.listeners.List[conn.RemoteAddr().String()], s.cfg.CamelChannel)
 	case TYPE_KEEPALIVE_RESP:
-		LogMessage("INFO", conn.RemoteAddr().String()+": KeepAlive BRT <- SCP - OK")
+		logs.ProcessInfo(conn.RemoteAddr().String() + ": KeepAlive BRT <- SCP - OK")
 	case TYPE_KEEPALIVE_REQ:
 		camel_tmp.Type = TYPE_KEEPALIVE_RESP
 		camel_tmp.Sequence = camel.Sequence
 		s.Sec = camel.Sequence
 		tmprw, _ := camel_tmp.Encoder()
 		if _, err = conn.WriteTo(tmprw); err != nil {
-			LogMessage("ERROR", err)
+			logs.ProcessError(err)
 		}
-		LogMessage("INFO", conn.RemoteAddr().String()+": KeepAlive BRT -> SCP")
+		logs.ProcessInfo(conn.RemoteAddr().String() + ": KeepAlive BRT -> SCP")
 	case TYPE_SHUTDOWN_REQ:
 		camel_tmp.Type = TYPE_SHUTDOWN_RESP
 		camel_tmp.Sequence = camel.Sequence
@@ -248,11 +246,11 @@ func (s *Server) CamelResponse(conn *Listener, camel Camel_tcp) {
 		camel_tmp.Frame[tmp.Tag] = tmp
 		tmprw, _ := camel_tmp.Encoder()
 		if _, err = conn.WriteTo(tmprw); err != nil {
-			LogMessage("ERROR", err)
+			logs.ProcessError(err)
 		}
 		conn.Close()
 		s.listeners.DeleteCloseConn(conn.Server)
-		LogMessage("INFO", conn.RemoteAddr().String()+": connection close")
+		logs.ProcessInfo(conn.RemoteAddr().String() + ": connection close")
 	default:
 		// Вызов основного обработчика из основного кода
 		// Запись ошибок, можно сделать экспериент, с передачей на уровень выше
@@ -272,41 +270,14 @@ func Init() {
 	}
 
 	loggerOnce.Do(func() {
-		go LogWriteForGoRutine(LogChannel)
+		logs = logger.NewLogWriter("camel.log", debug)
+		go logs.LogWriteForGoRutineStruct()
 	})
 }
 
-// Запись ошибок из горутин
-func LogWriteForGoRutine(text chan LogStruct) {
-	var logcamel log.Logger
-	filer1, err := os.OpenFile("camel.log", os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0666)
-	if err != nil {
-		logcamel.Fatal(err)
-	}
-
-	defer filer1.Close()
-	logcamel.SetOutput(filer1)
-	logcamel.SetPrefix("")
-	logcamel.SetFlags(log.Ldate | log.Ltime)
-
-	for i := range text {
-		datetime := time.Now().Local().Format("2006/01/02 15:04:05")
-		logcamel.SetPrefix(datetime + " " + i.level + ": ")
-		logcamel.SetFlags(0)
-		logcamel.Println(i.text)
-		logcamel.SetPrefix("")
-		logcamel.SetFlags(log.Ldate | log.Ltime)
-	}
-}
-
 func (s *Server) ServerStop() {
-	LogMessage("INFO", "Stoping CAMEL SCP")
+	logs.ProcessInfo("Stoping CAMEL SCP")
 	s.ln.Close()
-}
-
-// logMessage отправляет сообщение в лог.
-func LogMessage(level string, message interface{}) {
-	LogChannel <- LogStruct{level, message}
 }
 
 // Функция чтения из буфера
@@ -329,7 +300,7 @@ func (s *Server) readNetConnLenght(conn *Listener) error {
 	camel := NewCamelTCP()
 	_, _, err = camel.DecoderBuffer(value)
 	if err != nil {
-		LogMessage("ERROR", err)
+		logs.ProcessError(err)
 	}
 	s.CamelResponse(conn, camel)
 	return nil

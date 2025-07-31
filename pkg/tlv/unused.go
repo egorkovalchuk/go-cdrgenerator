@@ -12,7 +12,7 @@ func (s *Server) CamelHandler1(conn *Listener) {
 	var buffer_tmp []byte
 	cont := 0
 
-	LogMessage("INFO", "Client connected from "+conn.RemoteAddr().String())
+	logs.ProcessInfo("Client connected from " + conn.RemoteAddr().String())
 	timeoutDuration := 1 * time.Second
 	conn.SetReadDeadline(time.Now().Add(timeoutDuration))
 
@@ -29,7 +29,7 @@ func (s *Server) CamelHandler1(conn *Listener) {
 			for {
 				buffer_tmp, cont, err = camel.DecoderBuffer(buffer_tmp)
 				if err != nil {
-					LogMessage("ERROR", err)
+					logs.ProcessError(err)
 				}
 				// если посчитан пакет. то вызываем обработчик
 				if cont != -1 {
@@ -43,10 +43,10 @@ func (s *Server) CamelHandler1(conn *Listener) {
 		case io.EOF:
 			s.listeners.DeleteCloseConn(conn.Server)
 			conn.Close()
-			LogMessage("INFO", conn.RemoteAddr().String()+": connection close")
+			logs.ProcessInfo(conn.RemoteAddr().String() + ": connection close")
 			return
 		default:
-			LogMessage("ERROR", conn.RemoteAddr().String()+err.Error())
+			logs.ProcessError(conn.RemoteAddr().String() + err.Error())
 			//return
 			//errors.Is(err, os.ErrDeadlineExceeded)
 			//if err, ok := err.(net.Error); ok && err.Timeout()

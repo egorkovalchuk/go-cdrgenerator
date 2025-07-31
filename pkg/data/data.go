@@ -3,13 +3,11 @@ package data
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"math/rand"
 	"net"
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -102,37 +100,9 @@ type RecTypeRatioType struct {
 }
 
 // Структура строки пула
-type RecTypePool struct {
-	Msisdn     string
-	IMSI       string
-	CallsCount int
-}
-
-type PoolSubs []RecTypePool
-
-// Структура строки пула
 type RecTypeLACPool struct {
 	LAC  int
 	CELL int
-}
-
-// Сткуртура для массива пост обработки
-type TypeBrtOfflineCdr struct {
-	RecPool  RecTypePool
-	CDRtime  time.Time
-	Ratio    RecTypeRatioType
-	TaskName string
-	// для кемел
-	DstMsisdn string
-	// duration
-	Lac  int
-	Cell int
-}
-
-// Пишем логи через горутину
-type LogStruct struct {
-	level string
-	text  interface{}
 }
 
 // Структура для хранения паттерна
@@ -203,27 +173,6 @@ func HelpStart() {
 	fmt.Println("Use -slow_camel for send Camel message every 10 seconds")
 }
 
-// Заполнение массива для последующей генерации нагрузки
-func (p PoolSubs) CreatePoolList(data [][]string, Task TasksType) PoolSubs {
-	var PoolList PoolSubs
-	for i, line := range data {
-		if i > 0 && checkRowTypes(line) { // omit header line
-			var rec RecTypePool
-			rec.Msisdn = "7" + line[0]
-			rec.IMSI = line[1]
-			rec.CallsCount = Task.GenCallCount()
-			PoolList = append(PoolList, rec)
-		}
-	}
-	return PoolList
-}
-
-func (p PoolSubs) ReinitializationPoolList(Task TasksType) {
-	for i := 0; i < len(p); i++ {
-		p[i].CallsCount = Task.GenCallCount()
-	}
-}
-
 // Заполнение количествово выбора на абонента
 func (p *TasksType) GenCallCount() int {
 	perc := rand.Float64()
@@ -282,160 +231,6 @@ func CreateCDRRecord(RecordMsisdn RecTypePool, date time.Time, RecordType RecTyp
 	return CDR_pattern, nil
 }
 
-// map c mutex
-// для контроля потока записи. Мутекс для избегания блокировок
-type Counters struct {
-	mx sync.Mutex
-	m  map[string]int
-}
-
-// Конструктор для типа данных Counters
-func NewCounters() *Counters {
-	return &Counters{
-		m: make(map[string]int),
-	}
-}
-
-// Получить значение
-func (c *Counters) Load(key string) int {
-	c.mx.Lock()
-	val := c.m[key]
-	c.mx.Unlock()
-	return val
-}
-
-// Загрузить значение
-func (c *Counters) Store(key string, value int) {
-	c.mx.Lock()
-	c.m[key] = value
-	c.mx.Unlock()
-}
-
-// Инкримент +1
-func (c *Counters) Inc(key string) {
-	c.mx.Lock()
-	c.m[key]++
-	c.mx.Unlock()
-}
-
-// Инкримент +N
-func (c *Counters) IncN(key string, inc int) {
-	c.mx.Lock()
-	c.m[key] += inc
-	c.mx.Unlock()
-}
-
-// Загрузка в лог
-func (c *Counters) LoadRangeToLog(s string, log *log.Logger) {
-	c.mx.Lock()
-	for k, v := range c.m {
-		log.Println(s + k + ": " + strconv.Itoa(v))
-	}
-	c.mx.Unlock()
-}
-
-// Загрузка в лог через функцию
-func (c *Counters) LoadRangeToLogFunc(s string, f func(logtext interface{})) {
-	c.mx.Lock()
-	for k, v := range c.m {
-		f(s + k + ": " + strconv.Itoa(v))
-	}
-	c.mx.Unlock()
-}
-
-// Возврат карты
-func (c *Counters) LoadMapSpeed(tmp map[string]int, Name string, Region string, ReportStat chan string, f func(logtext interface{})) map[string]int {
-	c.mx.Lock()
-	for i, j := range c.m {
-		ReportStat <- "cdr_" + Name + "_resp,region=" + Region + ",task_name=all,Resp_code=" + strings.ReplaceAll(i, " ", "_") + " speed=" + strconv.Itoa((j-tmp[i])/10)
-		tmp[i] = j
-	}
-	defer c.mx.Unlock()
-	return tmp
-}
-
-// map c mutex
-// для контроля потока записи. Мутекс для избегания блокировок
-type FlagType struct {
-	mx sync.Mutex
-	m  map[string]int
-}
-
-// Конструктор для типа данных Flag
-func NewFlag() *FlagType {
-	return &FlagType{
-		m: make(map[string]int),
-	}
-}
-
-// Получить значение
-func (c *FlagType) Load(key string) int {
-	c.mx.Lock()
-	val := c.m[key]
-	c.mx.Unlock()
-	return val
-}
-
-// Загрузить значение
-func (c *FlagType) Store(key string, value int) {
-	c.mx.Lock()
-	c.m[key] = value
-	c.mx.Unlock()
-}
-
-// map c mutex
-// для контроля потока записи. Мутекс для избегания блокировок
-type RecTypeCounters struct {
-	mx sync.Mutex
-	m  map[string]map[string]int
-}
-
-// Конструктор для типа данных Counters для расчетов по типам
-func NewRecTypeCounters() *RecTypeCounters {
-	return &RecTypeCounters{
-		m: make(map[string]map[string]int),
-	}
-}
-
-func (c *RecTypeCounters) AddMap(key1 string, key2 string, val int) map[string]map[string]int {
-	_, ok := c.m[key1]
-	if !ok {
-		mm := make(map[string]int)
-		c.m[key1] = mm
-	}
-	c.m[key1][key2] = val
-	return c.m
-}
-
-// Получить значение
-func (c *RecTypeCounters) Load(key1 string, key2 string) int {
-	c.mx.Lock()
-	val := c.m[key1][key2]
-	c.mx.Unlock()
-	return val
-}
-
-// Загрузить значение
-func (c *RecTypeCounters) Store(key1 string, key2 string, value int) {
-	c.mx.Lock()
-	c.m[key1][key2] = value
-	c.mx.Unlock()
-}
-
-// Инкримент +1
-func (c *RecTypeCounters) Inc(key1 string, key2 string) {
-	c.mx.Lock()
-	c.m[key1][key2]++
-	c.mx.Unlock()
-}
-
-func (c *RecTypeCounters) LoadString(key1 string, key2 string) string {
-	c.mx.Lock()
-	val, _ := c.m[key1][key2]
-	c.mx.Unlock()
-	return strconv.Itoa(val)
-}
-
 // Нештатное завершение при критичной ошибке
 func ProcessError(err error) {
 	fmt.Println(err)
@@ -463,89 +258,6 @@ func (i *ArgListType) Get(value string) bool {
 		}
 	}
 	return false
-}
-
-// Массив для работы с кешем запросов
-type BrtOfflineCdr struct {
-	mx         sync.RWMutex
-	CDROffline map[string](TypeBrtOfflineCdr)
-}
-
-// Конструктор для типа данных BrtOfflineCdr для кеша
-func NewCDROffline() *BrtOfflineCdr {
-	return &BrtOfflineCdr{
-		CDROffline: make(map[string](TypeBrtOfflineCdr)),
-	}
-}
-
-// Получить значение
-func (c *BrtOfflineCdr) Load(key string) TypeBrtOfflineCdr {
-	c.mx.RLock()
-	val := c.CDROffline[key]
-	c.mx.RUnlock()
-	return val
-}
-
-// Загрузить значение
-func (c *BrtOfflineCdr) Store(key string, value TypeBrtOfflineCdr) {
-	c.mx.Lock()
-	c.CDROffline[key] = value
-	c.mx.Unlock()
-}
-
-// Удалить значение
-func (c *BrtOfflineCdr) Delete(key string) {
-	c.mx.Lock()
-	delete(c.CDROffline, key)
-	c.mx.Unlock()
-}
-
-// Рандомное значение
-func (c *BrtOfflineCdr) Random() (rr string) {
-	c.mx.Lock()
-	k := rand.Intn(len(c.CDROffline))
-	for d, r1 := range c.CDROffline {
-		if k == 0 {
-			c.mx.Unlock()
-			return d + fmt.Sprint(r1)
-		}
-		k--
-	}
-	c.mx.Unlock()
-	return rr
-}
-
-// Генерация номера
-func RandomMSISDN(tsk string) string {
-	if tsk == "roam" {
-		// логика для международных
-		return ""
-	} else {
-		// Коды российских сотовых операторов (2023)
-		mobilePrefixes := []string{
-			"901", "902", "903", "904", "905", "906", "908", "909", // Tele2
-			"915", "916", "917", "919", "985", "986", "987", "989", // МТС
-			"921", "922", "923", "924", "925", "926", "927", "928", "929", "931", // Мегафон
-			"930", "931", "932", "933", "934", "936", "937", "938", "939", // Билайн
-			"950", "951", "952", "953", "954", "955", "956", "958", // Yota
-			"960", "961", "962", "963", "964", "965", "966", "967", "968", "969", // другие операторы
-			"970", "971", "972", "973", "974", "975", "976", "977", "978", "979",
-			"980", "981", "982", "983", "984", "988",
-		}
-		// Выбираем случайный префикс
-		prefixIndex := rand.Intn(len(mobilePrefixes))
-		prefix := mobilePrefixes[prefixIndex]
-		// Генерируем остальные 7 цифр номера
-		var number string
-		for i := 0; i < 7; i++ {
-			digit := rand.Intn(10)
-			number += strconv.Itoa(digit)
-		}
-
-		// Форматируем номер в международном формате
-		return "7" + prefix + number
-	}
-
 }
 
 func GetLocalIP() string {

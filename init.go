@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strconv"
 
-	"log"
 	"os"
 	"time"
 
@@ -14,97 +13,18 @@ import (
 	"github.com/fiorix/go-diameter/v4/diam"
 )
 
-type LogStruct struct {
-	level string
-	text  interface{}
-}
-
-// Запись ошибок из горутин
-// можно добавить ротейт по дате + архив в отдельном потоке
-func LogWriteForGoRutineStruct(logs chan LogStruct) {
-	// Открытие лог файла
-	// ротация не поддерживается в текущей версии
-	// Вынести в горутину
-	filer, err := os.OpenFile(logFileName, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0666)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer filer.Close()
-	logger := log.New(filer, "", 0) // Создаем отдельный логгер для файла
-
-	log.SetOutput(filer)
-	for entry := range logs {
-		prefix := time.Now().Local().Format("2006/01/02 15:04:05") + " " + entry.level + ": "
-		logger.SetPrefix(prefix)
-		logger.Println(entry.text)
-	}
-}
-
 // Запись ошибок из горутин для диаметра
 func DiamPrintErrors(ec <-chan *diam.ErrorReport) {
 	for err := range ec {
-		LogChannel <- LogStruct{"DIAM", err}
+		logs.ProcessDiam(err)
 	}
-}
-
-// Запись в лог при включенном дебаге
-// Сделать горутиной?
-func ProcessDebug(logtext interface{}) {
-	if debugm {
-		LogChannel <- LogStruct{"DEBUG", logtext}
-	}
-}
-
-// Запись в лог ошибок
-func ProcessError(logtext interface{}) {
-	LogChannel <- LogStruct{"ERROR", logtext}
-}
-
-// Запись в лог ошибок cсо множеством переменных
-func ProcessErrorAny(logtext ...interface{}) {
-	t := ""
-	for _, a := range logtext {
-		t += fmt.Sprint(a) + " "
-	}
-	LogChannel <- LogStruct{"ERROR", t}
-}
-
-// Запись в лог WARM
-func ProcessWarm(logtext interface{}) {
-	LogChannel <- LogStruct{"WARM", logtext}
-}
-
-// Запись в лог INFO
-func ProcessInfo(logtext interface{}) {
-	LogChannel <- LogStruct{"INFO", logtext}
-}
-
-// Запись в лог Diam
-func ProcessDiam(logtext interface{}) {
-	LogChannel <- LogStruct{"DIAM", logtext}
-}
-
-// Запись в лог Camel
-func ProcessCamel(logtext interface{}) {
-	LogChannel <- LogStruct{"CAMEL", logtext}
-}
-
-// Запись в лог Influx
-func ProcessInflux(logtext interface{}) {
-	LogChannel <- LogStruct{"INFLUX", logtext}
-}
-
-// Нештатное завершение при критичной ошибке
-func ProcessPanic(logtext interface{}) {
-	fmt.Println(logtext)
-	os.Exit(2)
 }
 
 // Инициализация переменных
 func InitVariables() {
 	//Если не задан параметр используем дефолтное значение
 	if global_cfg.Common.Duration == 0 {
-		ProcessInfo("Script use default duration - 14400 sec")
+		logs.ProcessInfo("Script use default duration - 14400 sec")
 		global_cfg.Common.Duration = 14400
 	}
 
@@ -156,11 +76,11 @@ func InitVariables() {
 		if task.DatapoolCsvLac != "" {
 			f, err := os.Open(task.DatapoolCsvLac)
 			if err != nil {
-				ProcessErrorAny("Unable to read input file "+task.DatapoolCsvLac, err)
-				ProcessError("Thread " + task.Name + " not start")
+				logs.ProcessErrorAny("Unable to read input file "+task.DatapoolCsvLac, err)
+				logs.ProcessError("Thread " + task.Name + " not start")
 			} else {
 				defer f.Close()
-				ProcessDebug("Start load" + task.DatapoolCsvLac)
+				logs.ProcessDebug("Start load" + task.DatapoolCsvLac)
 
 				// read csv values using csv.Reader
 				csvReader := csv.NewReader(f)
@@ -168,7 +88,7 @@ func InitVariables() {
 				csvReader.Comma = ';'
 				csv, err := csvReader.ReadAll()
 				if err != nil {
-					ProcessError(err)
+					logs.ProcessError(err)
 				} else {
 					var PoolList []data.RecTypeLACPool
 					for i, line := range csv {
@@ -184,13 +104,13 @@ func InitVariables() {
 				}
 			}
 		} else {
-			ProcessInfo("Pool not defined for " + task.Name)
+			logs.ProcessInfo("Pool not defined for " + task.Name)
 		}
 		if len(LACCELLpool[task.Name]) == 0 {
 			LACCELLpool[task.Name] = append(LACCELLpool[task.Name], data.RecTypeLACPool{LAC: task.DefaultLAC, CELL: task.DefaultCELL})
 			LACCELLlen[task.Name] = len(LACCELLpool[task.Name])
 		}
-		ProcessDebug("First record " + fmt.Sprint(LACCELLpool[task.Name][0]))
+		logs.ProcessDebug("First record " + fmt.Sprint(LACCELLpool[task.Name][0]))
 	}
 }
 

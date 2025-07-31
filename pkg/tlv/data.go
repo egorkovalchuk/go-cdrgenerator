@@ -30,12 +30,6 @@ type Listener struct {
 	cancel  context.CancelFunc
 }
 
-// Пишем логи через горутину
-type LogStruct struct {
-	level string
-	text  interface{}
-}
-
 // Эксперимент
 // Структура для записи в канал
 type WriteStruck struct {
@@ -92,12 +86,12 @@ func (p *Listener) WriteTo(tmpwr []byte) (n int, err error) {
 func (p *Listener) WriteChannel(in chan []byte, s *Server) {
 	for tmpwr := range in {
 		if _, err := p.WriteTo(tmpwr); err != nil {
-			LogChannel <- LogStruct{"ERROR", err}
+			logs.ProcessError(err)
 			if err == io.EOF {
 				p.Close()
 				s.listeners.DeleteCloseConn(p.Server)
-				LogChannel <- LogStruct{"INFO", p.RemoteAddr().String() + ": connection close"}
-				LogChannel <- LogStruct{"INFO", "Close threads"}
+				logs.ProcessInfo(p.RemoteAddr().String() + ": connection close")
+				logs.ProcessInfo("Close threads")
 				return
 			}
 		}
@@ -149,16 +143,13 @@ func NewListListener() *ListListener {
 
 func (c *ListListener) SaveOpenConn(value net.Conn, ctx context.Context) {
 	c.List[value.RemoteAddr().String()] = NewListener(value, ctx)
-	if debug {
-		LogChannel <- LogStruct{"DEBUG", "Add: Count CAMEL connection " + fmt.Sprint(len(c.List))}
-	}
+	logs.ProcessDebug("Add: Count CAMEL connection " + fmt.Sprint(len(c.List)))
+
 }
 
 func (c *ListListener) DeleteCloseConn(value net.Conn) {
 	delete(c.List, value.RemoteAddr().String())
-	if debug {
-		LogChannel <- LogStruct{"DEBUG", "Delete: Count CAMEL connection " + fmt.Sprint(len(c.List))}
-	}
+	logs.ProcessDebug("Delete: Count CAMEL connection " + fmt.Sprint(len(c.List)))
 }
 
 func DeleteCloseConn(value net.Conn, s *Server) {

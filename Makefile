@@ -1,6 +1,5 @@
 # Project variables
 BINARY_NAME=generator
-VERSION=0.5.7
 BUILD_TIME=$(shell date +%s)
 GIT_COMMIT=$(shell git rev-parse --short HEAD)
 
@@ -23,6 +22,8 @@ LDFLAGS=-ldflags "\
 	-X main.BuildTime=$(BUILD_TIME) \
 	-w -s"
 
+VERSION=$(shell $(GO) run  $(CMD_DIR) -v | awk '{print $$NF}' || echo "v0.0.0")
+
 # Default target
 .PHONY: all
 all: build
@@ -32,7 +33,7 @@ all: build
 build:
 	@echo "Building $(BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
-	$(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) $(CMD_DIR)
+	$(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)_$(VERSION) $(CMD_DIR)
 
 # Install dependencies
 .PHONY: deps
@@ -98,14 +99,14 @@ security:
 build-linux:
 	@echo "Building for Linux..."
 	@mkdir -p $(BUILD_DIR)
-	GOOS=linux GOARCH=amd64 $(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 $(CMD_DIR)
+	GOOS=linux GOARCH=amd64 $(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)_$(VERSION)-linux-amd64 $(CMD_DIR)
 
 # Build for Windows
 .PHONY: build-windows
 build-windows:
 	@echo "Building for Windows..."
 	@mkdir -p $(BUILD_DIR)
-	GOOS=windows GOARCH=amd64 $(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe $(CMD_DIR)
+	GOOS=windows GOARCH=amd64 $(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)_$(VERSION)-windows-amd64.exe $(CMD_DIR)
 
 # Build all platforms
 .PHONY: build-all
@@ -123,10 +124,11 @@ generate-cdr: build
 	@echo "Generating CDR..."
 	$(BUILD_DIR)/$(BINARY_NAME) -file -debug -rm -thread
 
+.PHONY: release
 release: clean build-linux build-windows
 	@cd $(BUILD_DIR) && \
-		tar -czf $(BINARY_NAME)-linux-$(VERSION).tar.gz $(BINARY_NAME)-linux && \
-		zip $(BINARY_NAME)-windows-$(VERSION).zip $(BINARY_NAME).exe
+		tar -czf $(BINARY_NAME)-linux-$(VERSION).tar.gz $(BINARY_NAME)_$(VERSION)-linux-amd64 && \
+		zip $(BINARY_NAME)-windows-$(VERSION).zip $(BINARY_NAME)_$(VERSION)-windows-amd64.exe
 
 # Show help
 .PHONY: help

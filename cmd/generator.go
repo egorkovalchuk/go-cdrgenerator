@@ -40,7 +40,7 @@ const (
 	logFileName  = "generator.log"
 	pidFileName  = "generator.pid"
 	confFileName = "config.json"
-	versionutil  = "0.5.7"
+	versionutil  = "0.5.8"
 )
 
 var (
@@ -129,7 +129,6 @@ var (
 func main() {
 	//start program
 	var argument string
-
 	if len(os.Args) > 1 {
 		argument = os.Args[1]
 	} else {
@@ -137,14 +136,18 @@ func main() {
 		return
 	}
 
-	if argument == "-h" {
+	switch argument {
+	case "-h":
 		data.HelpStart()
 		return
-	} else if argument == "-s" {
+	case "-s":
 		err := pid.StopProcess(pidFileName)
 		if err != nil {
 			fmt.Println(err.Error())
 		}
+		return
+	case "-v":
+		fmt.Println("Version utils " + versionutil)
 		return
 	}
 
@@ -177,11 +180,6 @@ func main() {
 	if startdaemon {
 		logs.ProcessInfo("Start daemon mode")
 		fmt.Println("Start util in daemon mode")
-	}
-
-	if version {
-		fmt.Println("Version utils " + versionutil)
-		return
 	}
 
 	// Чтение конфига

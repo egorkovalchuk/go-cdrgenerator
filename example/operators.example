@@ -1,0 +1,40 @@
+{
+    "operators": [
+      {
+        "name": "Verizon",
+        "country": "United States",
+        "countryCode": "1",
+        "prefixes": ["201", "202", "203", "205", "206"],
+        "numberLength": 10,
+        "lacRange": [1000, 9999],
+        "cellIdRange": [1, 65535]
+      },
+      {
+        "name": "T-Mobile",
+        "country": "Germany",
+        "countryCode": "49",
+        "prefixes": ["151", "152", "155", "157", "160"],
+        "numberLength": 11,
+        "lacRange": [10000, 19999],
+        "cellIdRange": [1, 65535]
+      },
+      {
+        "name": "China Mobile",
+        "country": "China",
+        "countryCode": "86",
+        "prefixes": ["130", "131", "132", "133", "134"],
+        "numberLength": 11,
+        "lacRange": [20000, 29999],
+        "cellIdRange": [1, 65535]
+      },
+      {
+        "name": "Vodafone",
+        "country": "UK",
+        "countryCode": "44",
+        "prefixes": ["7700", "7701", "7720", "7730", "7740"],
+        "numberLength": 10,
+        "lacRange": [30000, 39999],
+        "cellIdRange": [1, 65535]
+      }
+    ]
+  }

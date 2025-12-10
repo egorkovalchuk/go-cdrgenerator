@@ -105,4 +105,6 @@ Fixed generation of subscriber B
 Fixed create new thread
 ## Vesion 0.5.7
 ### new fearure
+Add custom configs 
 ### Fix Bug
+Fix error if once rete parameter

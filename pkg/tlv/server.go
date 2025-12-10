@@ -14,7 +14,6 @@ import (
 )
 
 var (
-	debug            bool
 	camel_params_map map[uint16]camel_param_desc
 	camel_type_map   map[string]camel_type_len
 
@@ -45,8 +44,7 @@ func NewServer(cfg *Config, listeners *ListListener) *Server {
 
 // SetDebug устанавливает режим отладки.
 func SetDebug(c bool) {
-	debug = c
-	logs.ChangeDebugLevel(debug)
+	logs.ChangeDebugLevel(c)
 }
 
 func (s *Server) ServerStart(ctx context.Context) {
@@ -270,7 +268,7 @@ func Init() {
 	}
 
 	loggerOnce.Do(func() {
-		logs = logger.NewLogWriter("camel.log", debug)
+		logs = logger.NewLogWriter("camel.log", false)
 		go logs.LogWriteForGoRutineStruct()
 	})
 }

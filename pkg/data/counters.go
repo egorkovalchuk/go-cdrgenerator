@@ -121,6 +121,7 @@ func (c *RecTypeCounters) Store(key1 string, key2 string, value int) {
 // Инкримент +1
 func (c *RecTypeCounters) Inc(key1 string, key2 string) {
 	c.mx.Lock()
+	// if c.m[key1] ==nil -отключено, так есть обязательная инициализация при старте
 	c.m[key1][key2]++
 	c.mx.Unlock()
 }

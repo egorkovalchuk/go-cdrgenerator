@@ -14,7 +14,6 @@ type LogStruct struct {
 
 type LogWriter struct {
 	logger      *log.Logger
-	filer       *os.File
 	LogChannel  chan LogStruct
 	logFileName string
 	debugm      bool

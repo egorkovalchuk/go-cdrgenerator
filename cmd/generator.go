@@ -37,9 +37,10 @@ import (
 //Power by  Egor Kovalchuk
 
 const (
-	logFileName = "generator.log"
-	pidFileName = "generator.pid"
-	versionutil = "0.5.7"
+	logFileName  = "generator.log"
+	pidFileName  = "generator.pid"
+	confFileName = "config.json"
+	versionutil  = "0.5.7"
 )
 
 var (
@@ -47,12 +48,8 @@ var (
 	global_cfg data.Config
 	// режим работы сервиса(дебаг мод)
 	debugm bool
-	// ошибки
-	err error
 	// режим работы сервиса
 	startdaemon bool
-	// запрос версии
-	version bool
 	// Запись в фаил
 	tofile bool
 	// для выбора типа соединения
@@ -144,13 +141,16 @@ func main() {
 		data.HelpStart()
 		return
 	} else if argument == "-s" {
-		err = pid.StopProcess(pidFileName)
+		err := pid.StopProcess(pidFileName)
 		if err != nil {
 			fmt.Println(err.Error())
 		}
 		return
 	}
 
+	var confname string
+	var version bool
+	flag.StringVar(&confname, "config", confFileName, "start with users config")
 	flag.BoolVar(&debugm, "debug", false, "Start with debug mode")
 	flag.BoolVar(&startdaemon, "d", false, "Start SCP server")
 	flag.BoolVar(&version, "v", false, "Print version")
@@ -185,13 +185,13 @@ func main() {
 	}
 
 	// Чтение конфига
-	global_cfg.ReadConf("config.json")
+	global_cfg.ReadConf(confname)
 
 	// инициализация переменных
 	InitVariables()
 
 	// создаем pid
-	err = pid.SetPID(pidFileName)
+	err := pid.SetPID(pidFileName)
 	if err != nil {
 		logs.ProcessError("Can not create pid-file: " + err.Error())
 	}
@@ -1004,7 +1004,7 @@ func StartCamelServer() {
 // Эксперимент
 func CamelWriteGorutine(in chan tlv.WriteStruck) {
 	for tmp := range in {
-		if _, err = tmp.C.WriteTo(tmp.B); err != nil {
+		if _, err := tmp.C.WriteTo(tmp.B); err != nil {
 			logs.ProcessError(err)
 			if err == io.EOF || errors.Is(err, net.ErrClosed) {
 				tmp.C.Close()
@@ -1018,7 +1018,7 @@ func CamelWriteGorutine(in chan tlv.WriteStruck) {
 
 // Отправка сообщений
 func CamelWrite(C *tlv.Listener, B []byte) {
-	if _, err = C.WriteTo(B); err != nil {
+	if _, err := C.WriteTo(B); err != nil {
 		logs.ProcessError(err)
 		if err == io.EOF || errors.Is(err, net.ErrClosed) {
 			C.Close()
@@ -1335,7 +1335,7 @@ func end() {
 		delfilefortest()
 	}
 
-	err = pid.RemovePID(pidFileName)
+	err := pid.RemovePID(pidFileName)
 	if err != nil {
 		logs.ProcessError("Can not remove pid-file: " + err.Error())
 	}

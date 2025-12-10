@@ -51,16 +51,17 @@ func InitVariables() {
 		// Инициализация среза для полсчета типов
 		task.RecTypeRatio[0].RangeMax = task.RecTypeRatio[0].Rate
 		task.RecTypeRatio[0].RangeMin = 0
-		for i := 1; i < len(task.RecTypeRatio); i++ {
-			// Заполняем проценты попадания типа звонков
-			// 0..56..78..98..100
-			// в основном теле генерируем случайное значение от 0 до 100 которое должно попасть с один из интервалов
-			task.RecTypeRatio[i].RangeMin = task.RecTypeRatio[i-1].RangeMax
-			task.RecTypeRatio[i].RangeMax = task.RecTypeRatio[i].Rate + task.RecTypeRatio[i].RangeMin
-			// Нахрена это добавлено? пока не удаляю. мож вспомню
-			// Flag.Store(task.Name+" "+task.RecTypeRatio[i].Name, 0)
-			// Инициализация счетчика типов звонка
-			CDRRecTypeCount.AddMap(task.Name, task.RecTypeRatio[i].Name, 0)
+		CDRRecTypeCount.AddMap(task.Name, task.RecTypeRatio[0].Name, 0)
+		if len(task.RecTypeRatio) > 1 {
+			for i := 1; i < len(task.RecTypeRatio); i++ {
+				// Заполняем проценты попадания типа звонков
+				// 0..56..78..98..100
+				// в основном теле генерируем случайное значение от 0 до 100 которое должно попасть с один из интервалов
+				task.RecTypeRatio[i].RangeMin = task.RecTypeRatio[i-1].RangeMax
+				task.RecTypeRatio[i].RangeMax = task.RecTypeRatio[i].Rate + task.RecTypeRatio[i].RangeMin
+				// Инициализация счетчика типов звонка
+				CDRRecTypeCount.AddMap(task.Name, task.RecTypeRatio[i].Name, 0)
+			}
 		}
 		// Формируем задержку для равномерного формирования
 		global_cfg.Tasks[i].Time_delay = 1000000 / task.CallsPerSecond

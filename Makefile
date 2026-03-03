@@ -1,5 +1,6 @@
 # Project variables
 BINARY_NAME=generator
+BINARY_NAME_UTILS=utils
 BUILD_TIME=$(shell date +%s)
 GIT_COMMIT=$(shell git rev-parse --short HEAD)
 
@@ -11,7 +12,8 @@ GO_TEST_FLAGS=-v -race -cover
 
 # Directories
 SRC_DIR=.
-CMD_DIR=./cmd
+CMD_DIR=./cmd/generator
+CMD_DIR_UTILS=./utils
 BUILD_DIR=./build
 COVERAGE_DIR=./coverage
 
@@ -34,6 +36,13 @@ build:
 	@echo "Building $(BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
 	$(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)_$(VERSION) $(CMD_DIR)
+
+# Build the application
+.PHONY: build-utils 
+build-utils:
+	@echo "Building $(BINARY_NAME_UTILS)..."
+	@mkdir -p $(BUILD_DIR)
+	$(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME_UTILS)_$(VERSION) $(CMD_DIR_UTILS)
 
 # Install dependencies
 .PHONY: deps
@@ -137,6 +146,7 @@ help:
 	@echo ""
 	@echo "  all            - Build the application (default)"
 	@echo "  build          - Build the application"
+	@echo "  build-utils    - Build the application"
 	@echo "  deps           - Download and tidy dependencies"
 	@echo "  run            - Run the application"
 	@echo "  test           - Run tests with coverage"

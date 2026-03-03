@@ -1,10 +1,10 @@
 module github.com/egorkovalchuk/go-cdrgenerator
 
-go 1.19
+go 1.23
 
 require (
 	github.com/fiorix/go-diameter/v4 v4.0.4
-	github.com/sijms/go-ora/v2 v2.8.22
+	github.com/sijms/go-ora/v2 v2.9.0
 )
 
 require (

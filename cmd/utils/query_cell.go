@@ -1,5 +1,3 @@
-//go:build ignore || gen
-// +build ignore gen
 package main
 
 import (
@@ -7,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -35,8 +34,14 @@ var (
 	cfg              UtilConf
 )
 
+const (
+	confFileName = "utilconfig.json"
+)
+
 func main() {
 	// Утилиты
+	var confname string
+	flag.StringVar(&confname, "config", confFileName, "start with users config")
 	flag.BoolVar(&pool, "pool", false, "Starting pool creation LAC/CELL, use -t task name -p password")
 	flag.StringVar(&pool_task, "t", "", "Task Name")
 	flag.StringVar(&connetion_string, "p", "", "Password")
@@ -44,7 +49,7 @@ func main() {
 	flag.Parse()
 
 	// Проверка на доп параметры
-	if pool_task == "" {
+	if pool_task == "" && !mass {
 		fmt.Println("Stop utils. Task name is empty. Use -t")
 		return
 	}
@@ -58,13 +63,15 @@ func main() {
 	if mass {
 		for _, t := range cfg.Tasks {
 			query_def := strings.Replace(t.Query, "{macr_id}", fmt.Sprint(t.MacrID), 1)
-			connect := strings.Replace(t.ConnectString, "{password}", connetion_string, 1)
+			connect := strings.Replace(t.ConnectString, "{password}", url.PathEscape(connetion_string), 1)
+			fmt.Println(connect)
 			CreatePoolCELL(t, connect, query_def)
 		}
 	} else {
 		cfgt := cfg.ReadTask(pool_task)
 		query_def := strings.Replace(cfgt.Query, "{macr_id}", fmt.Sprint(cfgt.MacrID), 1)
-		connect := strings.Replace(cfgt.ConnectString, "{password}", connetion_string, 1)
+		connect := strings.Replace(cfgt.ConnectString, "{password}", url.PathEscape(connetion_string), 1)
+		fmt.Println(connect)
 		CreatePoolCELL(cfgt, connect, query_def)
 	}
 
@@ -76,6 +83,7 @@ func CreatePoolCELL(cfgt TasksUtilType, connect string, query_def string) {
 		fmt.Println("Connection string not set")
 		os.Exit(1)
 	}
+
 	db, errdb := sql.Open("oracle", connect)
 	if errdb != nil {
 		fmt.Println(errdb)

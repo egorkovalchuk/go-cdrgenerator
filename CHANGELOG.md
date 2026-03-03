@@ -108,3 +108,8 @@ Fixed create new thread
 Add custom configs 
 ### Fix Bug
 Fix error if once rete parameter
+## Vesion 0.5.8
+### new fearure
+Added MakeFile
+Added generate roam msisdn
+## Vesion 0.6.0

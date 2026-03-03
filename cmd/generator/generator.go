@@ -989,6 +989,7 @@ func StartCamelServer() {
 
 	// Ждем открытие хотя бы одного соединения
 	// Потоки дочерних поднимаются листенером
+loop:
 	for {
 		select {
 		// Ждем выполнение таймаута
@@ -998,7 +999,7 @@ func StartCamelServer() {
 		default:
 			time.Sleep(time.Duration(5) * time.Second)
 			if len(list_listener.List) > 0 {
-				break
+				break loop
 			}
 			logs.ProcessInfo("Wait connet to SCP Server")
 		}

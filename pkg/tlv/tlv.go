@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/egorkovalchuk/go-cdrgenerator/pkg/data"
+	"github.com/egorkovalchuk/go-cdrgenerator/pkg/logger"
 )
 
 const (
@@ -86,32 +87,8 @@ func NewCamelTCPParam() Camel_tcp_param {
 	return Camel_tcp_param{}
 }
 
-// Декодирвоание пакета
-func (p *Camel_tcp) Decoder(r []byte) error {
-	defer func() {
-		if c := recover(); c != nil {
-			logs.ProcessInfo("Decoder Error TLV parsing")
-			logs.ProcessInfo("Decoder " + fmt.Sprint(r))
-		}
-	}()
-
-	p.LengthTCP = binary.BigEndian.Uint16(r[0:2])
-	p.Type = binary.BigEndian.Uint16(r[2:4])
-	p.Sequence = binary.BigEndian.Uint32(r[4:8])
-
-	if 8 >= int(p.LengthTCP) {
-		return nil
-	}
-
-	err := p.DecoderChunk(r, 8)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 // Декодирвоание пакета буффера
-func (p *Camel_tcp) DecoderBuffer(r []byte) (t []byte, cont int, err error) {
+func (p *Camel_tcp) DecoderBuffer(r []byte, logs *logger.LogWriter) (t []byte, cont int, err error) {
 	defer func() {
 		if c := recover(); c != nil {
 			logs.ProcessInfo("DecoderBuffer Error TLV parsing")
@@ -144,6 +121,7 @@ func (p *Camel_tcp) DecoderBuffer(r []byte) (t []byte, cont int, err error) {
 			err = p.DecoderChunk(r[0:i], 8)
 		}
 		if err != nil {
+			logs.ProcessError(err)
 			return nil, cont, err
 		}
 		return t, cont, nil
@@ -155,6 +133,7 @@ func (p *Camel_tcp) DecoderBuffer(r []byte) (t []byte, cont int, err error) {
 	case rl == i && i != 8:
 		err = p.DecoderChunk(r[0:i], 8)
 		if err != nil {
+			logs.ProcessError(err)
 			return nil, cont, err
 		}
 		return nil, cont, nil
@@ -180,7 +159,6 @@ func (p *Camel_tcp) DecoderChunk(r []byte, n int) error {
 		return nil
 	}
 	if err != nil {
-		logs.ProcessError(err)
 		return err
 	}
 	return nil
@@ -215,7 +193,7 @@ func (p *Camel_tcp) Encoder() ([]byte, error) {
 	p.LengthTCP, err = p.LenghtTCP()
 
 	if err != nil {
-		logs.ProcessInfo("ENCODER1 " + fmt.Sprint(p))
+		return []byte{}, fmt.Errorf("ENCODER1 %v, %w", fmt.Sprint(p), err)
 	}
 
 	var tmp []byte
@@ -251,10 +229,6 @@ func (p *Camel_tcp) Encoder() ([]byte, error) {
 			tmp = binary.BigEndian.AppendUint16(tmp, uint16(camel_type_map[i.Type].MaxLen))
 			tmp = append(tmp, i.Param...)
 		}
-	}
-
-	if err != nil {
-		logs.ProcessError(err)
 	}
 
 	return tmp, nil
@@ -344,7 +318,7 @@ func (p *Camel_tcp) AuthorizeSMS_req(msisdn string, imsi string, ServiceCode str
 	//TimeAndTimezone
 	tmp = NewCamelTCPParam()
 	tmp.Tag = camel_params_map[0x0030].Tag
-	tmp.Param = Stringtobytereverse(time.Now().Format("20060102030405") + "00")
+	tmp.Param = Stringtobytereverse(time.Now().Format("20060102030405")+"00", s.logs)
 	tmp.LengthParams = uint16(len(tmp.Param))
 	tmp.Type = camel_params_map[tmp.Tag].Type
 	p.Frame[tmp.Tag] = tmp
@@ -541,7 +515,7 @@ func (p *Camel_tcp) AuthorizeVoice_req(msisdn string, imsi string, ServiceCode s
 	//TimeAndTimezone
 	tmp = NewCamelTCPParam()
 	tmp.Tag = camel_params_map[0x0030].Tag
-	tmp.Param = Stringtobytereverse(time.Now().Format("20060102030405") + "00")
+	tmp.Param = Stringtobytereverse(time.Now().Format("20060102030405")+"00", s.logs)
 	tmp.LengthParams = uint16(len(tmp.Param))
 	tmp.Type = camel_params_map[tmp.Tag].Type
 	p.Frame[tmp.Tag] = tmp
@@ -664,17 +638,17 @@ func NewCamelSessionID(MSCGT string, id byte, s *Server) []byte {
 		if i < ln {
 			bit_left, err = strconv.Atoi(string(MSCGT[i*2]))
 			if err != nil {
-				logs.ProcessError("Stringtobytereverse " + err.Error())
+				s.logs.ProcessError("Stringtobytereverse " + err.Error())
 			}
 			bit_right, err = strconv.Atoi(string(MSCGT[i*2+1]))
 			if err != nil {
-				logs.ProcessError("NewSessionId " + err.Error())
+				s.logs.ProcessError("NewSessionId " + err.Error())
 			}
 		} else {
 			if parity != 0 && i == ln {
 				bit_left, err = strconv.Atoi(string(MSCGT[i*2]))
 				if err != nil {
-					logs.ProcessError("NewSessionId " + err.Error())
+					s.logs.ProcessError("NewSessionId " + err.Error())
 				}
 			} else {
 				bit_left = 15
@@ -703,7 +677,7 @@ func NewCamelSessionID(MSCGT string, id byte, s *Server) []byte {
 
 // Преобазование строки  байты - перевертыши
 // 2006 - > 0x02 0x60
-func Stringtobytereverse(t string) []byte {
+func Stringtobytereverse(t string, logs *logger.LogWriter) []byte {
 	var tmp []byte
 	var err error
 	ln, parity := divmod(len(t), 2)
@@ -744,7 +718,7 @@ func Stringtobytereverse(t string) []byte {
 
 // Преобазование строки  байты
 // 2006 - > 0x20 0x06
-func Stringtobyte(t string) []byte {
+func Stringtobyte(t string, logs *logger.LogWriter) []byte {
 	var tmp []byte
 	var err error
 	ln, parity := divmod(len(t), 2)
@@ -818,7 +792,7 @@ func (s *Server) InitMSC() {
 	//.001 .... = natureOfAddressIndicator: International (0x01)
 	//.... 0001 = numberingPlanIndicator: ISDN(Telephony)NumberingPlan (0x01)
 	//ISDNString:79 28 99 00 09 1
-	tmp := Stringtobytereverse(s.cfg.XVLR)
+	tmp := Stringtobytereverse(s.cfg.XVLR, s.logs)
 	s.LocationMSCbase = append(s.LocationMSCbase, 0x91) //Тип xVLR и его идентификатор
 	s.LocationMSCbase = append(s.LocationMSCbase, tmp...)
 
@@ -828,8 +802,8 @@ func (s *Server) InitMSC() {
 	s.LocationMSCbase = append(s.LocationMSCbase, 0x80) //Context, Primitive, 0x001
 	s.LocationMSCbase = append(s.LocationMSCbase, 0x07) //Длина
 
-	tmp = Stringtobytereverse(s.cfg.ContryCode)
+	tmp = Stringtobytereverse(s.cfg.ContryCode, s.logs)
 	s.LocationMSCbase = append(s.LocationMSCbase, tmp...)
-	tmp = Stringtobytereverse(s.cfg.OperatorCode)
+	tmp = Stringtobytereverse(s.cfg.OperatorCode, s.logs)
 	s.LocationMSCbase = append(s.LocationMSCbase, tmp...)
 }

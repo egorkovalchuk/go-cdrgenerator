@@ -13,7 +13,7 @@ GO_TEST_FLAGS=-v -race -cover
 # Directories
 SRC_DIR=.
 CMD_DIR=./cmd/generator
-CMD_DIR_UTILS=./utils
+CMD_DIR_UTILS=./cmd/utils
 BUILD_DIR=./build
 COVERAGE_DIR=./coverage
 

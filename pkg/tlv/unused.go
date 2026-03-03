@@ -1,6 +1,7 @@
 package tlv
 
 import (
+	"fmt"
 	"io"
 	"time"
 )
@@ -12,7 +13,7 @@ func (s *Server) CamelHandler1(conn *Listener) {
 	var buffer_tmp []byte
 	cont := 0
 
-	logs.ProcessInfo("Client connected from " + conn.RemoteAddr().String())
+	s.logs.ProcessInfo("Client connected from " + conn.RemoteAddr().String())
 	timeoutDuration := 1 * time.Second
 	conn.SetReadDeadline(time.Now().Add(timeoutDuration))
 
@@ -27,9 +28,9 @@ func (s *Server) CamelHandler1(conn *Listener) {
 			camel := NewCamelTCP()
 			buffer_tmp = append(buffer_tmp, message_io...)
 			for {
-				buffer_tmp, cont, err = camel.DecoderBuffer(buffer_tmp)
+				buffer_tmp, cont, err = camel.DecoderBuffer(buffer_tmp, s.logs)
 				if err != nil {
-					logs.ProcessError(err)
+					s.logs.ProcessError(err)
 				}
 				// если посчитан пакет. то вызываем обработчик
 				if cont != -1 {
@@ -42,11 +43,12 @@ func (s *Server) CamelHandler1(conn *Listener) {
 			}
 		case io.EOF:
 			s.listeners.DeleteCloseConn(conn.Server)
+			s.logs.ProcessDebug("Delete: Count CAMEL connection " + fmt.Sprint(len(s.listeners.List)))
 			conn.Close()
-			logs.ProcessInfo(conn.RemoteAddr().String() + ": connection close")
+			s.logs.ProcessInfo(conn.RemoteAddr().String() + ": connection close")
 			return
 		default:
-			logs.ProcessError(conn.RemoteAddr().String() + err.Error())
+			s.logs.ProcessError(conn.RemoteAddr().String() + err.Error())
 			//return
 			//errors.Is(err, os.ErrDeadlineExceeded)
 			//if err, ok := err.(net.Error); ok && err.Timeout()

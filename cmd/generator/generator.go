@@ -967,7 +967,7 @@ func StartCamelServer() {
 	camel_cfg := &tlv.Config{
 		Camel_port: global_cfg.Common.CAMEL.Port,
 		//	Duration:         global_cfg.Common.Duration,
-		Camel_SCP_id:     uint8(tlv.Stringtobyte(global_cfg.Common.CAMEL.Camel_SCP_id)[0]),
+		Camel_SCP_id:     uint8(tlv.Stringtobyte(global_cfg.Common.CAMEL.Camel_SCP_id, logs)[0]),
 		Camel_SMSAddress: global_cfg.Common.CAMEL.SMSCAddress,
 		XVLR:             global_cfg.Common.CAMEL.XVLR,
 		ContryCode:       global_cfg.Common.CAMEL.ContryCode,
@@ -980,7 +980,7 @@ func StartCamelServer() {
 	list_listener = tlv.NewListListener()
 	camelserver = tlv.NewServer(camel_cfg, list_listener)
 
-	tlv.SetDebug(debugm)
+	camelserver.SetDebug(debugm)
 
 	go camelserver.ServerStart(ctx)
 	// Запуск для эксперимента
@@ -990,11 +990,18 @@ func StartCamelServer() {
 	// Ждем открытие хотя бы одного соединения
 	// Потоки дочерних поднимаются листенером
 	for {
-		time.Sleep(time.Duration(5) * time.Second)
-		if len(list_listener.List) > 0 {
-			break
+		select {
+		// Ждем выполнение таймаута
+		// Добавить в дальнейшем выход по событию от системы
+		case <-ctx.Done():
+			return
+		default:
+			time.Sleep(time.Duration(5) * time.Second)
+			if len(list_listener.List) > 0 {
+				break
+			}
+			logs.ProcessInfo("Wait connet to SCP Server")
 		}
-		logs.ProcessInfo("Wait connet to SCP Server")
 	}
 }
 
@@ -1260,7 +1267,7 @@ func init() {
 }
 
 func end() {
-	logs.ProcessInfo("Start schelduler")
+	logs.ProcessInfo("Stop schelduler")
 	// Ждем выполнение таймаута
 	// Добавить в дальнейшем выход по событию от системы
 	go func() {

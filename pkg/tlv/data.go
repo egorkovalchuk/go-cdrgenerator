@@ -7,6 +7,8 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	"github.com/egorkovalchuk/go-cdrgenerator/pkg/logger"
 )
 
 type Server struct {
@@ -15,6 +17,9 @@ type Server struct {
 	ln              net.Listener
 	LocationMSCbase []byte
 	Sec             uint32
+
+	loggerOnce sync.Once
+	logs       *logger.LogWriter
 }
 
 type Client struct {
@@ -86,12 +91,13 @@ func (p *Listener) WriteTo(tmpwr []byte) (n int, err error) {
 func (p *Listener) WriteChannel(in chan []byte, s *Server) {
 	for tmpwr := range in {
 		if _, err := p.WriteTo(tmpwr); err != nil {
-			logs.ProcessError(err)
+			s.logs.ProcessError(err)
 			if err == io.EOF {
 				p.Close()
 				s.listeners.DeleteCloseConn(p.Server)
-				logs.ProcessInfo(p.RemoteAddr().String() + ": connection close")
-				logs.ProcessInfo("Close threads")
+				s.logs.ProcessDebug("Delete: Count CAMEL connection " + fmt.Sprint(len(s.listeners.List)))
+				s.logs.ProcessInfo(p.RemoteAddr().String() + ": connection close")
+				s.logs.ProcessInfo("Close threads")
 				return
 			}
 		}
@@ -143,13 +149,10 @@ func NewListListener() *ListListener {
 
 func (c *ListListener) SaveOpenConn(value net.Conn, ctx context.Context) {
 	c.List[value.RemoteAddr().String()] = NewListener(value, ctx)
-	logs.ProcessDebug("Add: Count CAMEL connection " + fmt.Sprint(len(c.List)))
-
 }
 
 func (c *ListListener) DeleteCloseConn(value net.Conn) {
 	delete(c.List, value.RemoteAddr().String())
-	logs.ProcessDebug("Delete: Count CAMEL connection " + fmt.Sprint(len(c.List)))
 }
 
 func DeleteCloseConn(value net.Conn, s *Server) {

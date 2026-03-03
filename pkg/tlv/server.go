@@ -3,11 +3,11 @@ package tlv
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"net"
 	"os"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/egorkovalchuk/go-cdrgenerator/pkg/logger"
@@ -16,9 +16,6 @@ import (
 var (
 	camel_params_map map[uint16]camel_param_desc
 	camel_type_map   map[string]camel_type_len
-
-	loggerOnce sync.Once
-	logs       *logger.LogWriter
 )
 
 // Клиент. Не используем, так как являемся сервером
@@ -39,18 +36,22 @@ func NewServer(cfg *Config, listeners *ListListener) *Server {
 		listeners: listeners,
 		Sec:       0,
 	}
+	s.logs = logger.NewLogWriter("camel.log", false)
+	s.loggerOnce.Do(func() {
+		go s.logs.LogWriteForGoRutineStruct()
+	})
 	return s
 }
 
 // SetDebug устанавливает режим отладки.
-func SetDebug(c bool) {
-	logs.ChangeDebugLevel(c)
+func (s *Server) SetDebug(c bool) {
+	s.logs.ChangeDebugLevel(c)
 }
 
 func (s *Server) ServerStart(ctx context.Context) {
 
-	logs.ProcessInfo("Starting CAMEL SCP")
 	Init()
+	s.logs.ProcessInfo("Starting CAMEL SCP")
 	s.InitMSC()
 
 	var err error
@@ -58,7 +59,7 @@ func (s *Server) ServerStart(ctx context.Context) {
 	s.ln, err = net.Listen("tcp", ":"+strconv.Itoa(s.cfg.Camel_port))
 
 	if err != nil {
-		logs.ProcessError(err)
+		s.logs.ProcessError(err)
 		return
 	}
 	defer s.ln.Close()
@@ -66,7 +67,7 @@ func (s *Server) ServerStart(ctx context.Context) {
 	// Открываем портб занести в цикл для много поточной обработки
 	// задать ограничение по количеству открытых коннектов (через структуру)
 	// из цикла не работает
-	logs.ProcessInfo("Start schelduler")
+	s.logs.ProcessInfo("Open port *:" + strconv.Itoa(s.cfg.Camel_port))
 
 	for {
 		select {
@@ -77,17 +78,18 @@ func (s *Server) ServerStart(ctx context.Context) {
 		default:
 			conn, err := s.ln.Accept()
 			if err != nil {
-				logs.ProcessError(err)
+				s.logs.ProcessError(err)
 				return
 			}
 			s.listeners.SaveOpenConn(conn, ctx)
+			s.logs.ProcessDebug("Add: Count CAMEL connection " + fmt.Sprint(len(s.listeners.List)))
 			// Запуск Обработчика
 			go s.CamelHandler(s.listeners.List[conn.RemoteAddr().String()])
 			// Запуск Отправки
 			// Запуск потока только после инициализации перенесено в CamelResponse
 			// go s.cfg.RequestFunc(s.listeners.List[conn.RemoteAddr().String()], s.cfg.CamelChannel)
-			logs.ProcessDebug("Local address " + conn.LocalAddr().String())
-			logs.ProcessDebug("Remote address " + conn.RemoteAddr().String())
+			s.logs.ProcessDebug("Local address " + conn.LocalAddr().String())
+			s.logs.ProcessDebug("Remote address " + conn.RemoteAddr().String())
 		}
 
 	}
@@ -98,7 +100,7 @@ func (s *Server) ServerStart(ctx context.Context) {
 func (s *Server) CamelHandler(conn *Listener) {
 	defer conn.Close()
 
-	logs.ProcessInfo("Client connected from  " + conn.RemoteAddr().String())
+	s.logs.ProcessInfo("Client connected from  " + conn.RemoteAddr().String())
 	// KeepAliveServer
 	heartbeat := time.NewTicker(20 * time.Second)
 	timeoutDuration := 2 * time.Second
@@ -145,9 +147,9 @@ func (s *Server) readNetConn(conn *Listener, buffer_tmp []byte) ([]byte, error) 
 	buffer_tmp = append(buffer_tmp, buff[:n]...)
 
 	for {
-		buffer_tmp, cont, err = camel.DecoderBuffer(buffer_tmp)
+		buffer_tmp, cont, err = camel.DecoderBuffer(buffer_tmp, s.logs)
 		if err != nil {
-			logs.ProcessError(err)
+			s.logs.ProcessError(err)
 		}
 		// если посчитан пакет. то вызываем обработчик
 		if cont != -1 {
@@ -168,35 +170,39 @@ func (s *Server) handleReadError(conn *Listener, err error) error {
 	case io.EOF:
 		conn.Close()
 		s.listeners.DeleteCloseConn(conn.Server)
-		logs.ProcessInfo(conn.RemoteAddr().String() + ": connection close")
+		s.logs.ProcessDebug("Delete: Count CAMEL connection " + fmt.Sprint(len(s.listeners.List)))
+		s.logs.ProcessInfo(conn.RemoteAddr().String() + ": connection close")
 		return err
 	case os.ErrDeadlineExceeded:
 		conn.Close()
 		s.listeners.DeleteCloseConn(conn.Server)
-		logs.ProcessInfo(conn.RemoteAddr().String() + ": connection close (ErrDeadlineExceeded)")
+		s.logs.ProcessDebug("Delete: Count CAMEL connection " + fmt.Sprint(len(s.listeners.List)))
+		s.logs.ProcessInfo(conn.RemoteAddr().String() + ": connection close (ErrDeadlineExceeded)")
 		return err
 	case net.ErrClosed:
 		conn.Close()
 		s.listeners.DeleteCloseConn(conn.Server)
-		logs.ProcessInfo(conn.RemoteAddr().String() + ": connection close (net.ErrClosed)")
+		s.logs.ProcessDebug("Delete: Count CAMEL connection " + fmt.Sprint(len(s.listeners.List)))
+		s.logs.ProcessInfo(conn.RemoteAddr().String() + ": connection close (net.ErrClosed)")
 		return err
 	default:
-		logs.ProcessError(conn.RemoteAddr().String() + ": " + err.Error())
+		s.logs.ProcessError(conn.RemoteAddr().String() + ": " + err.Error())
 	}
 	return nil
 }
 
 // sendKeepAlive отправляет KeepAlive-сообщение.
 func (s *Server) sendKeepAlive(conn *Listener) {
-	logs.ProcessInfo(conn.RemoteAddr().String() + ": KeepAlive")
+	s.logs.ProcessInfo(conn.RemoteAddr().String() + ": KeepAlive")
 	// Пока оставляю. но БРТ сам шлет KeepAlive
 	// Надо менять запрос
 	tmprw := []byte{0, 8, 0, 7, 0, 0, 0, 1}
 	if _, err := conn.WriteTo(tmprw); err != nil {
-		logs.ProcessError(err)
+		s.logs.ProcessError(err)
 		if err == io.EOF {
 			s.listeners.DeleteCloseConn(conn.Server)
-			logs.ProcessInfo(conn.RemoteAddr().String() + ": connection close")
+			s.logs.ProcessDebug("Delete: Count CAMEL connection " + fmt.Sprint(len(s.listeners.List)))
+			s.logs.ProcessInfo(conn.RemoteAddr().String() + ": connection close")
 		}
 	}
 }
@@ -214,25 +220,25 @@ func (s *Server) CamelResponse(conn *Listener, camel Camel_tcp) {
 		camel_tmp.Sequence = camel.Sequence
 		tmprw, _ := camel_tmp.Encoder()
 		if _, err = conn.WriteTo(tmprw); err != nil {
-			logs.ProcessError(err)
+			s.logs.ProcessError(err)
 		}
-		logs.ProcessInfo(conn.RemoteAddr().String() + ": Initial SCP")
+		s.logs.ProcessInfo(conn.RemoteAddr().String() + ": Initial SCP")
 		s.listeners.SaveBRTIdConn(conn.Server, camel.Frame[0x0050].Param[0])
 		// Запуск Отправки
 		// Запуск потока только после инициализации
-		logs.ProcessInfo(conn.RemoteAddr().String() + ": Starting a data transfer stream")
+		s.logs.ProcessInfo(conn.RemoteAddr().String() + ": Starting a data transfer stream")
 		go s.cfg.RequestFunc(s.listeners.List[conn.RemoteAddr().String()], s.cfg.CamelChannel)
 	case TYPE_KEEPALIVE_RESP:
-		logs.ProcessInfo(conn.RemoteAddr().String() + ": KeepAlive BRT <- SCP - OK")
+		s.logs.ProcessInfo(conn.RemoteAddr().String() + ": KeepAlive BRT <- SCP - OK")
 	case TYPE_KEEPALIVE_REQ:
 		camel_tmp.Type = TYPE_KEEPALIVE_RESP
 		camel_tmp.Sequence = camel.Sequence
 		s.Sec = camel.Sequence
 		tmprw, _ := camel_tmp.Encoder()
 		if _, err = conn.WriteTo(tmprw); err != nil {
-			logs.ProcessError(err)
+			s.logs.ProcessError(err)
 		}
-		logs.ProcessInfo(conn.RemoteAddr().String() + ": KeepAlive BRT -> SCP")
+		s.logs.ProcessInfo(conn.RemoteAddr().String() + ": KeepAlive BRT -> SCP")
 	case TYPE_SHUTDOWN_REQ:
 		camel_tmp.Type = TYPE_SHUTDOWN_RESP
 		camel_tmp.Sequence = camel.Sequence
@@ -244,11 +250,12 @@ func (s *Server) CamelResponse(conn *Listener, camel Camel_tcp) {
 		camel_tmp.Frame[tmp.Tag] = tmp
 		tmprw, _ := camel_tmp.Encoder()
 		if _, err = conn.WriteTo(tmprw); err != nil {
-			logs.ProcessError(err)
+			s.logs.ProcessError(err)
 		}
 		conn.Close()
 		s.listeners.DeleteCloseConn(conn.Server)
-		logs.ProcessInfo(conn.RemoteAddr().String() + ": connection close")
+		s.logs.ProcessDebug("Delete: Count CAMEL connection " + fmt.Sprint(len(s.listeners.List)))
+		s.logs.ProcessInfo(conn.RemoteAddr().String() + ": connection close")
 	default:
 		// Вызов основного обработчика из основного кода
 		// Запись ошибок, можно сделать экспериент, с передачей на уровень выше
@@ -266,16 +273,15 @@ func Init() {
 	for _, j := range camel_type {
 		camel_type_map[j.Type] = j
 	}
-
-	loggerOnce.Do(func() {
-		logs = logger.NewLogWriter("camel.log", false)
-		go logs.LogWriteForGoRutineStruct()
-	})
 }
 
 func (s *Server) ServerStop() {
-	logs.ProcessInfo("Stoping CAMEL SCP")
+	s.logs.ProcessInfo("Stoping CAMEL SCP")
 	s.ln.Close()
+}
+
+func (s *Server) GetLogger() *logger.LogWriter {
+	return s.logs
 }
 
 // Функция чтения из буфера
@@ -296,9 +302,9 @@ func (s *Server) readNetConnLenght(conn *Listener) error {
 	}
 
 	camel := NewCamelTCP()
-	_, _, err = camel.DecoderBuffer(value)
+	_, _, err = camel.DecoderBuffer(value, s.logs)
 	if err != nil {
-		logs.ProcessError(err)
+		s.logs.ProcessError(err)
 	}
 	s.CamelResponse(conn, camel)
 	return nil

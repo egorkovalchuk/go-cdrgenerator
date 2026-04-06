@@ -45,15 +45,21 @@ func (l *LogWriter) LogWriteForGoRutineStruct() {
 }
 
 // Запись в лог при включенном дебаге
-func (l *LogWriter) ProcessDebug(logtext interface{}) {
+func (l *LogWriter) ProcessDebug(logtext interface{}, opt ...string) {
 	if l.debugm {
-		l.LogChannel <- LogStruct{"DEBUG", logtext}
+		l.LogChannel <- LogStruct{l.Prefix(opt...) + "DEBUG", logtext}
 	}
 }
 
 // Запись в лог ошибок
-func (l *LogWriter) ProcessError(logtext interface{}) {
-	l.LogChannel <- LogStruct{"ERROR", logtext}
+func (l *LogWriter) ProcessError(logtext interface{}, opt ...string) {
+	l.LogChannel <- LogStruct{l.Prefix(opt...) + "ERROR", logtext}
+}
+
+// Запись в лог ошибок
+func (l *LogWriter) ProcessCritical(logtext interface{}, opt ...string) {
+	l.LogChannel <- LogStruct{l.Prefix(opt...) + "CRITICAL", logtext}
+	fmt.Println(logtext)
 }
 
 // Запись в лог ошибок cсо множеством переменных
@@ -62,27 +68,17 @@ func (l *LogWriter) ProcessErrorAny(logtext ...interface{}) {
 	for _, a := range logtext {
 		t += fmt.Sprint(a) + " "
 	}
-	l.LogChannel <- LogStruct{"ERROR", t}
+	l.LogChannel <- LogStruct{l.Prefix() + "ERROR", t}
 }
 
 // Запись в лог WARM
-func (l *LogWriter) ProcessWarm(logtext interface{}) {
-	l.LogChannel <- LogStruct{"WARM", logtext}
+func (l *LogWriter) ProcessWarm(logtext interface{}, opt ...string) {
+	l.LogChannel <- LogStruct{l.Prefix(opt...) + "WARM", logtext}
 }
 
 // Запись в лог INFO
-func (l *LogWriter) ProcessInfo(logtext interface{}) {
-	l.LogChannel <- LogStruct{"INFO", logtext}
-}
-
-// Запись в лог Diam
-func (l *LogWriter) ProcessDiam(logtext interface{}) {
-	l.LogChannel <- LogStruct{"DIAM", logtext}
-}
-
-// Запись в лог Influx
-func (l *LogWriter) ProcessInflux(logtext interface{}) {
-	l.LogChannel <- LogStruct{"INFLUX", logtext}
+func (l *LogWriter) ProcessInfo(logtext interface{}, opt ...string) {
+	l.LogChannel <- LogStruct{l.Prefix(opt...) + "INFO", logtext}
 }
 
 // Нештатное завершение при критичной ошибке
@@ -94,6 +90,16 @@ func (l *LogWriter) ProcessPanic(logtext interface{}) {
 // Смена уровня логирования
 func (l *LogWriter) ChangeDebugLevel(debugm bool) {
 	l.debugm = debugm
+	if debugm {
+		l.LogChannel <- LogStruct{l.Prefix() + "DEBUG", "Start debug mode"}
+	} else {
+		l.LogChannel <- LogStruct{l.Prefix() + "DEBUG", "Stop debug mode"}
+	}
+}
+
+// Уровень логирования
+func (l *LogWriter) GetDebugLevel() bool {
+	return l.debugm
 }
 
 func (l *LogWriter) GetLogger() *log.Logger {
@@ -101,13 +107,35 @@ func (l *LogWriter) GetLogger() *log.Logger {
 }
 
 // Запись в лог
-func (l *LogWriter) ProcessLog(level string, logtext interface{}) {
+func (l *LogWriter) ProcessLog(level string, logtext interface{}, opt ...string) {
 	switch level {
 	case "DEBUG":
-		l.ProcessDebug(logtext)
+		l.ProcessDebug(logtext, opt...)
 	case "PANIC":
 		l.ProcessPanic(logtext)
 	default:
-		l.LogChannel <- LogStruct{level, logtext}
+		l.LogChannel <- LogStruct{l.Prefix(opt...) + level, logtext}
 	}
+}
+
+func (l *LogWriter) Printf(level, format string, args ...any) {
+	l.ProcessLog(level, fmt.Sprintf(format, args...))
+}
+
+func (l *LogWriter) Prefix(opt ...string) (prefix string) {
+	if len(opt) > 0 {
+		for ind, i := range opt {
+			switch ind {
+			case 0:
+				prefix += fmt.Sprintf("[%s] ", i)
+			case 1:
+				prefix += fmt.Sprintf("(%s) ", i)
+			default:
+				prefix += i + " "
+			}
+		}
+	} else {
+		prefix = "[MAIN] "
+	}
+	return
 }

@@ -21,11 +21,11 @@ type Config struct {
 // InfluxWriter реализует запись данных в InfluxDB
 type InfluxWriter struct {
 	config  *Config
-	logFunc func(interface{})
+	logFunc func(string, interface{}, ...string)
 }
 
 // NewInfluxWriter создает новый экземпляр
-func NewInfluxWriter(cfg *Config, logFunc func(interface{})) *InfluxWriter {
+func NewInfluxWriter(cfg *Config, logFunc func(string, interface{}, ...string)) *InfluxWriter {
 	return &InfluxWriter{
 		config:  cfg,
 		logFunc: logFunc,
@@ -35,17 +35,17 @@ func NewInfluxWriter(cfg *Config, logFunc func(interface{})) *InfluxWriter {
 // StartHTTPWriter запускает горутину для записи через HTTP
 func (w *InfluxWriter) StartHTTPWriter(input <-chan string) {
 	go func() {
-		w.logFunc("Start InfluxDB writer")
+		w.logFunc("INFO", "Start InfluxDB writer", "INFL")
 		request := w.prepareHTTPRequest()
 
 		if request == "" {
-			w.logFunc("Stopping influx writer: Unsupported InfluxDB version")
+			w.logFunc("ERROR", "Stopping influx writer: Unsupported InfluxDB version", "INFL")
 			return
 		}
 
 		for str := range input {
 			if err := w.sendHTTPRequest(request, str); err != nil {
-				w.logFunc(err)
+				w.logFunc("ERROR", err, "INFL")
 			}
 		}
 	}()
@@ -54,17 +54,17 @@ func (w *InfluxWriter) StartHTTPWriter(input <-chan string) {
 // StartUDPWriter запускает горутину для записи через UDP
 func (w *InfluxWriter) StartUDPWriter(input <-chan string) {
 	go func() {
-		w.logFunc("Start InfluxDB writer")
+		w.logFunc("INFO", "Start InfluxDB writer", "INFL")
 		conn, err := w.newUDPClient()
 		if err != nil {
-			w.logFunc(err)
+			w.logFunc("ERROR", err, "INFL")
 			return
 		}
 		defer conn.Close()
 
 		for str := range input {
 			if _, err := conn.Write([]byte(str)); err != nil {
-				w.logFunc(err)
+				w.logFunc("ERROR", err, "INFL")
 			}
 		}
 	}()
@@ -85,7 +85,7 @@ func (w *InfluxWriter) prepareHTTPRequest() string {
 		request += "api/v2/write?bucket=" + w.config.InfluxBucket +
 			"&precision=ns&org=" + w.config.InfluxOrg
 	default:
-		w.logFunc("Unsupported InfluxDB version")
+		w.logFunc("WARM", "Unsupported InfluxDB version", "INFL")
 		return ""
 	}
 

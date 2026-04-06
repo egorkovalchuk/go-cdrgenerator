@@ -27,11 +27,11 @@ type TasksUtilType struct {
 
 // Запуск утилиты генерации пула LAC/CELL
 var (
-	pool             bool
-	connetion_string string
-	pool_task        string
-	mass             bool
-	cfg              UtilConf
+	pool              bool
+	connection_string string
+	pool_task         string
+	mass              bool
+	cfg               UtilConf
 )
 
 const (
@@ -44,7 +44,7 @@ func main() {
 	flag.StringVar(&confname, "config", confFileName, "start with users config")
 	flag.BoolVar(&pool, "pool", false, "Starting pool creation LAC/CELL, use -t task name -p password")
 	flag.StringVar(&pool_task, "t", "", "Task Name")
-	flag.StringVar(&connetion_string, "p", "", "Password")
+	flag.StringVar(&connection_string, "p", "", "Password")
 	flag.BoolVar(&mass, "m", false, "Start all task")
 	flag.Parse()
 
@@ -53,7 +53,7 @@ func main() {
 		fmt.Println("Stop utils. Task name is empty. Use -t")
 		return
 	}
-	if connetion_string == "" {
+	if connection_string == "" {
 		fmt.Println("Stop utils. Password is empty. Use -p")
 		return
 	}
@@ -63,14 +63,14 @@ func main() {
 	if mass {
 		for _, t := range cfg.Tasks {
 			query_def := strings.Replace(t.Query, "{macr_id}", fmt.Sprint(t.MacrID), 1)
-			connect := strings.Replace(t.ConnectString, "{password}", url.PathEscape(connetion_string), 1)
+			connect := strings.Replace(t.ConnectString, "{password}", url.PathEscape(connection_string), 1)
 			fmt.Println(connect)
 			CreatePoolCELL(t, connect, query_def)
 		}
 	} else {
 		cfgt := cfg.ReadTask(pool_task)
 		query_def := strings.Replace(cfgt.Query, "{macr_id}", fmt.Sprint(cfgt.MacrID), 1)
-		connect := strings.Replace(cfgt.ConnectString, "{password}", url.PathEscape(connetion_string), 1)
+		connect := strings.Replace(cfgt.ConnectString, "{password}", url.PathEscape(connection_string), 1)
 		fmt.Println(connect)
 		CreatePoolCELL(cfgt, connect, query_def)
 	}

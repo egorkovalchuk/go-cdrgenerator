@@ -42,7 +42,8 @@ build:
 build-utils:
 	@echo "Building $(BINARY_NAME_UTILS)..."
 	@mkdir -p $(BUILD_DIR)
-	$(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME_UTILS)_$(VERSION) $(CMD_DIR_UTILS)
+	GOOS=linux GOARCH=amd64 $(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME_UTILS)_$(VERSION)-linux-amd64 $(CMD_DIR_UTILS)
+	GOOS=windows GOARCH=amd64 $(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME_UTILS)_$(VERSION)-windows-amd64.exe $(CMD_DIR_UTILS)
 
 # Install dependencies
 .PHONY: deps
@@ -134,10 +135,10 @@ generate-cdr: build
 	$(BUILD_DIR)/$(BINARY_NAME) -file -debug -rm -thread
 
 .PHONY: release
-release: clean build-linux build-windows
+release: clean build-linux build-windows build-utils
 	@cd $(BUILD_DIR) && \
-		tar -czf $(BINARY_NAME)-linux-$(VERSION).tar.gz $(BINARY_NAME)_$(VERSION)-linux-amd64 && \
-		zip $(BINARY_NAME)-windows-$(VERSION).zip $(BINARY_NAME)_$(VERSION)-windows-amd64.exe
+		tar -czf $(BINARY_NAME)-linux-$(VERSION).tar.gz $(BINARY_NAME)_$(VERSION)-linux-amd64 $(BINARY_NAME_UTILS)_$(VERSION)-linux-amd64 && \
+		zip $(BINARY_NAME)-windows-$(VERSION).zip $(BINARY_NAME)_$(VERSION)-windows-amd64.exe $(BINARY_NAME_UTILS)_$(VERSION)-windows-amd64.exe
 
 # Show help
 .PHONY: help

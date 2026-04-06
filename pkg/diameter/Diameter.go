@@ -219,7 +219,7 @@ func CreateCCREventMessage(Msisdn data.RecTypePool, date time.Time, RecordType d
 }
 
 // Обработчик ответа, возвращает код ответа и сессию
-func ResponseDiamHandler(message *diam.Message, f func(logtext interface{}), debug bool) (int, string) {
+func ResponseDiamHandler(message *diam.Message, f func(level string, logtext interface{}, opt ...string), debug bool) (int, string) {
 
 	var err error
 	// универсальный формирование ответа
@@ -238,7 +238,7 @@ func ResponseDiamHandler(message *diam.Message, f func(logtext interface{}), deb
 	// выделение кода ответа
 	mm, err := message.FindAVPs(268, 0)
 	if err != nil {
-		f(message)
+		f("ERROR", message, "DIAM")
 	}
 
 	resp_code := 0
@@ -255,17 +255,17 @@ func ResponseDiamHandler(message *diam.Message, f func(logtext interface{}), deb
 	// Текст ошибки
 	mm, _ = message.FindAVPs(avp.ErrorMessage, 0)
 	for _, i := range mm {
-		f(" ResponseDiamHandler: " + ConvertType(i))
+		f("ERROR", " ResponseDiamHandler: "+ConvertType(i), "DIAM")
 	}
 
 	// Получение SID
 	if message.Header.CommandCode == 272 {
 		m, r1 := message.FindAVP(263, 0)
 		if r1 != nil {
-			f(message)
+			f("ERROR", message, "DIAM")
 		}
 		if m.String() == "" {
-			f(" ResponseDiamHandler: " + ConvertType(m))
+			f("ERROR", "ResponseDiamHandler: "+ConvertType(m), "DIAM")
 		}
 		return s, ConvertType(m)
 	} else {
@@ -289,23 +289,23 @@ func ConvertType(m *diam.AVP) string {
 }
 
 // переподключение
-func Reconnect(cli *sm.Client, addr string, logFunc func(interface{})) diam.Conn {
+func Reconnect(cli *sm.Client, addr string, logFunc func(string, interface{}, ...string)) diam.Conn {
 	var retryCount int
 
 	for {
 		brt_connect, err := Dial(cli, addr, "", "", false, "tcp")
-		logFunc("Reconnect diameter client " + addr + " retry " + fmt.Sprint(retryCount))
+		logFunc("INFO", "Reconnect diameter client "+addr+" retry "+fmt.Sprint(retryCount), "DIAM")
 		if err != nil {
 			retryCount++
-			logFunc(fmt.Sprintf("Error connetct to %s: %v", addr, err))
+			logFunc("ERROR", fmt.Sprintf("Error connect to %s: %v", addr, err), "DIAM")
 			if retryCount > 5 {
-				logFunc("Maximum number of connection attempts reached")
+				logFunc("ERROR", "Maximum number of connection attempts reached", "DIAM")
 				return nil
 			}
 			time.Sleep(30 * time.Second)
 			continue
 		} else {
-			logFunc(fmt.Sprintf("Successful connetct to %s", addr))
+			logFunc("INFO", fmt.Sprintf("Successful connect to %s", addr), "DIAM")
 			return brt_connect
 		}
 	}

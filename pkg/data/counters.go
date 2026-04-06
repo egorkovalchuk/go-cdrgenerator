@@ -1,7 +1,6 @@
 package data
 
 import (
-	"log"
 	"strconv"
 	"strings"
 	"sync"
@@ -50,26 +49,17 @@ func (c *Counters) IncN(key string, inc int) {
 	c.mx.Unlock()
 }
 
-// Загрузка в лог
-func (c *Counters) LoadRangeToLog(s string, log *log.Logger) {
-	c.mx.Lock()
-	for k, v := range c.m {
-		log.Println(s + k + ": " + strconv.Itoa(v))
-	}
-	c.mx.Unlock()
-}
-
 // Загрузка в лог через функцию
-func (c *Counters) LoadRangeToLogFunc(s string, f func(logtext interface{})) {
+func (c *Counters) LoadRangeToLogFunc(s string, f func(logtext interface{}, opt ...string), args ...string) {
 	c.mx.Lock()
 	for k, v := range c.m {
-		f(s + k + ": " + strconv.Itoa(v))
+		f(s+k+": "+strconv.Itoa(v), args...)
 	}
 	c.mx.Unlock()
 }
 
 // Возврат карты
-func (c *Counters) LoadMapSpeed(tmp map[string]int, Name string, Region string, ReportStat chan string, f func(logtext interface{})) map[string]int {
+func (c *Counters) LoadMapSpeed(tmp map[string]int, Name string, Region string, ReportStat chan string) map[string]int {
 	c.mx.Lock()
 	for i, j := range c.m {
 		ReportStat <- "cdr_" + Name + "_resp,region=" + Region + ",task_name=all,Resp_code=" + strings.ReplaceAll(i, " ", "_") + " speed=" + strconv.Itoa((j-tmp[i])/10)

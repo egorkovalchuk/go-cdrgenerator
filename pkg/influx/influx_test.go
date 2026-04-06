@@ -13,7 +13,7 @@ type MockLogger struct {
 	Messages []string
 }
 
-func (m *MockLogger) Log(message interface{}) {
+func (m *MockLogger) Log(level string, message interface{}, opt ...string) {
 	m.Messages = append(m.Messages, fmt.Sprint(message))
 }
 

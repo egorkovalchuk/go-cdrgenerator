@@ -40,7 +40,7 @@ const (
 	logFileName  = "generator.log"
 	pidFileName  = "generator.pid"
 	confFileName = "config.json"
-	versionutil  = "0.6.0"
+	versionutil  = "0.6.1"
 )
 
 var (
@@ -213,7 +213,7 @@ func main() {
 			InfluxVersion: global_cfg.Common.Report.InfluxVersion,
 			InfluxBucket:  global_cfg.Common.Report.InfluxBucket,
 			InfluxServer:  global_cfg.Common.Report.InfluxServer,
-		}, logs.ProcessInflux)
+		}, logs.ProcessLog)
 		// Запуск горутины записи в инфлюкс
 		w.StartHTTPWriter(ReportStat)
 	}
@@ -246,7 +246,7 @@ func StartSimpleMode() {
 		} else {
 			f, err := os.Open(thread.DatapoolCsvFile)
 			if err != nil {
-				logs.ProcessErrorAny("Unable to read input file "+thread.DatapoolCsvFile, err)
+				logs.ProcessError(fmt.Sprintf("Unable to read input file %s: %s", thread.DatapoolCsvFile, err.Error()))
 				logs.ProcessError("Thread " + thread.Name + " not start")
 			} else {
 				defer f.Close()
@@ -365,31 +365,31 @@ func Monitor() {
 				}
 			}
 		case <-heartbeat10:
-			logs.ProcessInfo("10 second generator statistics")
+			logs.ProcessInfo("10 second generator statistics", "STAT")
 			for _, thread := range global_cfg.Tasks {
-				logs.ProcessInfo("Load " + strconv.Itoa(CDRRecCount.Load(thread.Name)) + " records for " + thread.Name)
+				logs.ProcessInfo("Load "+strconv.Itoa(CDRRecCount.Load(thread.Name))+" records for "+thread.Name, "STAT")
 				if tofile {
-					logs.ProcessInfo("Save " + strconv.Itoa(CDRFileCount.Load(thread.Name)) + " files for " + thread.Name)
+					logs.ProcessInfo("Save "+strconv.Itoa(CDRFileCount.Load(thread.Name))+" files for "+thread.Name, "STAT")
 				}
 				for _, t := range thread.RecTypeRatio {
-					logs.ProcessInfo("Load " + thread.Name + " calls type " + t.Record_type + " type service " + t.TypeService + "(" + t.Name + ") " + CDRRecTypeCount.LoadString(thread.Name, t.Name))
+					logs.ProcessInfo("Load "+thread.Name+" calls type "+t.Record_type+" type service "+t.TypeService+"("+t.Name+") "+CDRRecTypeCount.LoadString(thread.Name, t.Name), "STAT")
 				}
 			}
 			if brt {
 				for _, ip := range global_cfg.Common.BRT {
-					logs.ProcessInfo("Send " + strconv.Itoa(CDRDiamCount.Load(ip)) + " Diameter messages to " + ip)
+					logs.ProcessInfo("Send "+strconv.Itoa(CDRDiamCount.Load(ip))+" Diameter messages to "+ip, "STAT")
 				}
-				CDRDiamResponseCount.LoadRangeToLogFunc("Diameter response code ", logs.ProcessInfo)
+				CDRDiamResponseCount.LoadRangeToLogFunc("Diameter response code ", logs.ProcessInfo, "STAT")
 				if global_cfg.Common.Report.Influx {
-					tmpDiam = CDRDiamResponseCount.LoadMapSpeed(tmpDiam, "brt", global_cfg.Common.Report.Region, ReportStat, logs.ProcessInflux)
+					tmpDiam = CDRDiamResponseCount.LoadMapSpeed(tmpDiam, "brt", global_cfg.Common.Report.Region, ReportStat)
 				}
 			}
 			if camel {
-				CDRCamelCount.LoadRangeToLogFunc("Camel messages id  ", logs.ProcessInfo)
-				CDRCamelResponseCount.LoadRangeToLogFunc("Camel response code Brt id ", logs.ProcessInfo)
-				CDRCamelRCount.LoadRangeToLogFunc("Camel messages revc ", logs.ProcessInfo)
+				CDRCamelCount.LoadRangeToLogFunc("Camel messages id  ", logs.ProcessInfo, "STAT")
+				CDRCamelResponseCount.LoadRangeToLogFunc("Camel response code Brt id ", logs.ProcessInfo, "STAT")
+				CDRCamelRCount.LoadRangeToLogFunc("Camel messages revc ", logs.ProcessInfo, "STAT")
 				if global_cfg.Common.Report.Influx {
-					tmpCamel = CDRCamelResponseCount.LoadMapSpeed(tmpCamel, "camel", global_cfg.Common.Report.Region, ReportStat, logs.ProcessInflux)
+					tmpCamel = CDRCamelResponseCount.LoadMapSpeed(tmpCamel, "camel", global_cfg.Common.Report.Region, ReportStat)
 				}
 			}
 		}
@@ -638,19 +638,19 @@ func StartDiameterClient() {
 	// Запуск потока записи ошибок в лог
 	go DiamPrintErrors(mux.ErrorReports())
 
-	logs.ProcessDiam("Connecting clients...")
+	logs.ProcessInfo("Connecting clients...", "DIAM")
 	for _, init_connect := range global_cfg.Common.BRT {
 
-		logs.ProcessDebug(init_connect)
+		logs.ProcessDebug(init_connect, "DIAM")
 		var err error
 
 		brt_connect, err := diameter.Dial(cli, init_connect+":"+strconv.Itoa(global_cfg.Common.BRT_port), "", "", false, "tcp")
 
 		if err != nil {
-			logs.ProcessError("Connect error ")
-			logs.ProcessError(err)
+			logs.ProcessError("Connect error ", "DIAM")
+			logs.ProcessError(err, "DIAM")
 		} else {
-			logs.ProcessDebug("Connect to " + init_connect + " done.")
+			logs.ProcessInfo("Connect to "+init_connect+" done.", "DIAM")
 			// Запуск потоков записи по БРТ
 			// Отмеаем что клиент запущен
 			wgd.Add(1)
@@ -659,9 +659,9 @@ func StartDiameterClient() {
 	}
 	// Проверка что клиент запущен
 	if wgd.ExpectAtLeast(0) {
-		logs.ProcessDiam("Done. Sending messages...")
+		logs.ProcessInfo("Done. Sending messages...", "DIAM")
 	} else {
-		logs.ProcessDiam("Stopping the client's diameter. No connection is initialized")
+		logs.ProcessWarm("Stopping the client's diameter. No connection is initialized", "DIAM")
 		brt = false
 	}
 }
@@ -669,7 +669,7 @@ func StartDiameterClient() {
 // Тест горутина обработки ответов диаметра
 func DiamAnswer(f chan diam.Message) {
 	for m := range f {
-		s, sid := diameter.ResponseDiamHandler(&m, logs.ProcessDiam, debugm)
+		s, sid := diameter.ResponseDiamHandler(&m, logs.ProcessLog, debugm)
 		CDRDiamResponseCount.Inc(strconv.Itoa(s))
 		if s == 4011 || s == 4522 || s == 4012 {
 			//logdiam.Println("DIAM: Answer CCA code: " + strconv.Itoa(s) + " Session: " + sid)
@@ -698,7 +698,7 @@ func AnswerCCAEvent() diam.HandlerFunc {
 	return func(c diam.Conn, m *diam.Message) {
 		go func() {
 			// Конкуренция по ответам, запись в фаил?
-			s, sid := diameter.ResponseDiamHandler(m, logs.ProcessDiam, debugm)
+			s, sid := diameter.ResponseDiamHandler(m, logs.ProcessLog, debugm)
 			CDRDiamResponseCount.Inc(strconv.Itoa(s))
 			CDRDiamRCount.Inc(c.RemoteAddr().String())
 			if s == 4011 || s == 4522 || s == 4012 {
@@ -726,14 +726,14 @@ func AnswerCCAEvent() diam.HandlerFunc {
 func AnswerDWAEvent() diam.HandlerFunc {
 	return func(c diam.Conn, m *diam.Message) {
 		//обработчик ошибок, вотч дог пишем в обычный лог
-		s, _ := diameter.ResponseDiamHandler(m, logs.ProcessDiam, debugm)
-		logs.ProcessDiam("Answer " + c.RemoteAddr().String() + " DWA code:" + strconv.Itoa(s))
+		s, _ := diameter.ResponseDiamHandler(m, logs.ProcessLog, debugm)
+		logs.ProcessInfo("Answer "+c.RemoteAddr().String()+" DWA code:"+strconv.Itoa(s), "DIAM")
 	}
 }
 
 func AnswerALLEvent() diam.HandlerFunc {
 	return func(c diam.Conn, m *diam.Message) {
-		logs.ProcessDiam(m)
+		logs.ProcessInfo(m, "DIAM")
 	}
 }
 
@@ -748,7 +748,7 @@ func SendCCREvent(c diam.Conn, cfg *sm.Settings, cli *sm.Client, in chan diamete
 	heartbeat := time.Tick(10 * time.Second)
 	_, ok := smpeer.FromContext(c.Context())
 	if !ok {
-		logs.ProcessDiam("Client connection does not contain metadata")
+		logs.ProcessError("Client connection does not contain metadata", "DIAM")
 	}
 
 	for {
@@ -758,7 +758,7 @@ func SendCCREvent(c diam.Conn, cfg *sm.Settings, cli *sm.Client, in chan diamete
 			return
 		case <-c.(diam.CloseNotifier).CloseNotify():
 			wgd.Done()
-			cc := diameter.Reconnect(cli, c.RemoteAddr().String(), logs.ProcessDiam)
+			cc := diameter.Reconnect(cli, c.RemoteAddr().String(), logs.ProcessLog)
 			if cc != nil {
 				c = cc
 				wgd.Add(1)
@@ -770,7 +770,7 @@ func SendCCREvent(c diam.Conn, cfg *sm.Settings, cli *sm.Client, in chan diamete
 			// Сделать выход или переоткрытие?
 			_, ok := smpeer.FromContext(c.Context())
 			if !ok {
-				logs.ProcessDiam("Client connection does not contain metadata")
+				logs.ProcessError("Client connection does not contain metadata", "DIAM")
 			}
 
 			// Настройка Watch Dog
@@ -778,7 +778,7 @@ func SendCCREvent(c diam.Conn, cfg *sm.Settings, cli *sm.Client, in chan diamete
 			m.NewAVP(avp.OriginHost, avp.Mbit, 0, cfg.OriginHost)
 			m.NewAVP(avp.OriginRealm, avp.Mbit, 0, cfg.OriginRealm)
 			m.NewAVP(avp.OriginStateID, avp.Mbit, 0, cfg.OriginStateID)
-			logs.ProcessDiam(fmt.Sprintf("Sending DWR to %s", c.RemoteAddr()))
+			logs.ProcessInfo(fmt.Sprintf("Sending DWR to %s", c.RemoteAddr()), "DIAM")
 			_, err = m.WriteTo(c)
 			if err != nil {
 				logs.ProcessError(err)
@@ -787,7 +787,7 @@ func SendCCREvent(c diam.Conn, cfg *sm.Settings, cli *sm.Client, in chan diamete
 		case tmp := <-in:
 			meta, ok := smpeer.FromContext(c.Context())
 			if !ok {
-				logs.ProcessDiam("Client connection does not contain metadata")
+				logs.ProcessError("Client connection does not contain metadata", "DIAM")
 			}
 
 			diam_message := tmp.Message
@@ -823,7 +823,7 @@ func StartDaemonMode() {
 		} else {
 			f, err := os.Open(thread.DatapoolCsvFile)
 			if err != nil {
-				logs.ProcessErrorAny("Unable to read input file "+thread.DatapoolCsvFile, err)
+				logs.ProcessError(fmt.Sprintf("Unable to read input file %s: %s", thread.DatapoolCsvFile, err.Error()))
 				logs.ProcessError("Thread " + thread.Name + " not start")
 			} else {
 				defer f.Close()
@@ -989,19 +989,21 @@ func StartCamelServer() {
 
 	// Ждем открытие хотя бы одного соединения
 	// Потоки дочерних поднимаются листенером
-loop:
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
 	for {
 		select {
 		// Ждем выполнение таймаута
 		// Добавить в дальнейшем выход по событию от системы
 		case <-ctx.Done():
 			return
-		default:
+		case <-ticker.C:
 			time.Sleep(time.Duration(5) * time.Second)
 			if len(list_listener.List) > 0 {
-				break loop
+				return
 			}
-			logs.ProcessInfo("Wait connet to SCP Server")
+			logs.ProcessInfo("Wait connect to SCP Server")
 		}
 	}
 }
@@ -1051,7 +1053,10 @@ func CamelSend() tlv.HandReq {
 				}
 				// Прописываем id BRT
 				tmprw.Frame[0x002C].Param[13] = c.BRTId
-				tmp, _ := tmprw.Encoder()
+				tmp, err := tmprw.Encoder()
+				if err != nil {
+					logs.ProcessError(err)
+				}
 				CamelWrite(c, tmp)
 				CDRCamelCount.Inc(c.RemoteAddr().String())
 			}
@@ -1268,7 +1273,6 @@ func init() {
 }
 
 func end() {
-	logs.ProcessInfo("Stop schelduler")
 	// Ждем выполнение таймаута
 	// Добавить в дальнейшем выход по событию от системы
 	go func() {
@@ -1281,6 +1285,8 @@ func end() {
 	logs.ProcessInfo(ctx.Err().Error())
 	logs.ProcessInfo("Stoping")
 	gostop = true
+
+	logs.ProcessInfo("Stop schelduler")
 
 	// Закрытие окрытого порта
 	if camel {
@@ -1300,23 +1306,23 @@ func end() {
 
 	// Вывод статистики работы утилиты
 	for _, thread := range global_cfg.Tasks {
-		logs.ProcessInfo("All load " + strconv.Itoa(CDRRecCount.Load(thread.Name)) + " records for " + thread.Name)
+		logs.ProcessInfo("All load "+strconv.Itoa(CDRRecCount.Load(thread.Name))+" records for "+thread.Name, "STAT")
 		if tofile {
-			logs.ProcessInfo("Save " + strconv.Itoa(CDRFileCount.Load(thread.Name)) + " files for " + thread.Name)
+			logs.ProcessInfo("Save "+strconv.Itoa(CDRFileCount.Load(thread.Name))+" files for "+thread.Name, "STAT")
 		}
 		if brt || camel {
-			logs.ProcessInfo("Save offline " + strconv.Itoa(CDRRecCount.Load(thread.Name+"offline")) + " CDR for " + thread.Name)
+			logs.ProcessInfo("Save offline "+strconv.Itoa(CDRRecCount.Load(thread.Name+"offline"))+" CDR for "+thread.Name, "STAT")
 		}
 	}
 	if brt {
 		for _, ip := range global_cfg.Common.BRT {
-			logs.ProcessInfo("Send " + strconv.Itoa(CDRDiamCount.Load(ip)) + " Diameter messages to " + ip)
+			logs.ProcessInfo("Send "+strconv.Itoa(CDRDiamCount.Load(ip))+" Diameter messages to "+ip, "STAT")
 		}
-		CDRDiamResponseCount.LoadRangeToLogFunc("Diameter response code ", logs.ProcessInfo)
+		CDRDiamResponseCount.LoadRangeToLogFunc("Diameter response code ", logs.ProcessInfo, "STAT")
 	}
 	if camel {
-		CDRCamelCount.LoadRangeToLogFunc("Camel messages ", logs.ProcessInfo)
-		CDRCamelResponseCount.LoadRangeToLogFunc("Camel response code BRT id ", logs.ProcessInfo)
+		CDRCamelCount.LoadRangeToLogFunc("Camel messages ", logs.ProcessInfo, "STAT")
+		CDRCamelResponseCount.LoadRangeToLogFunc("Camel response code BRT id ", logs.ProcessInfo, "STAT")
 	}
 
 	logs.ProcessInfo("End schelduler")
@@ -1327,12 +1333,12 @@ func end() {
 		if len(BrtOfflineCDR.CDROffline) > 0 {
 			logs.ProcessDebug(len(BrtOfflineCDR.CDROffline))
 			logs.ProcessDebug(BrtOfflineCDR.Random())
-			CDRDiamRCount.LoadRangeToLogFunc("BRT messages revc ", logs.ProcessInfo)
+			CDRDiamRCount.LoadRangeToLogFunc("BRT messages revc ", logs.ProcessInfo, "STAT")
 		}
 		if len(CamelOfflineCDR.CDROffline) > 0 {
 			logs.ProcessDebug(len(CamelOfflineCDR.CDROffline))
 		}
-		CDRCamelRCount.LoadRangeToLogFunc("Camel messages revc ", logs.ProcessInfo)
+		CDRCamelRCount.LoadRangeToLogFunc("Camel messages revc ", logs.ProcessInfo, "STAT")
 	}
 
 	// Очищаем директории

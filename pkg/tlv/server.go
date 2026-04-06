@@ -50,7 +50,6 @@ func (s *Server) SetDebug(c bool) {
 
 func (s *Server) ServerStart(ctx context.Context) {
 
-	Init()
 	s.logs.ProcessInfo("Starting CAMEL SCP")
 	s.InitMSC()
 
@@ -212,13 +211,15 @@ func (s *Server) sendKeepAlive(conn *Listener) {
 // func CamelResponse(conn net.Conn, camel Camel_tcp) {
 func (s *Server) CamelResponse(conn *Listener, camel Camel_tcp) {
 	var camel_tmp Camel_tcp
-	var err error
 
 	switch camel.Type {
 	case TYPE_STARTUP_REQ:
 		camel_tmp.Type = TYPE_STARTUP_RESP
 		camel_tmp.Sequence = camel.Sequence
-		tmprw, _ := camel_tmp.Encoder()
+		tmprw, err := camel_tmp.Encoder()
+		if err != nil {
+			s.logs.ProcessError(err)
+		}
 		if _, err = conn.WriteTo(tmprw); err != nil {
 			s.logs.ProcessError(err)
 		}
@@ -234,7 +235,10 @@ func (s *Server) CamelResponse(conn *Listener, camel Camel_tcp) {
 		camel_tmp.Type = TYPE_KEEPALIVE_RESP
 		camel_tmp.Sequence = camel.Sequence
 		s.Sec = camel.Sequence
-		tmprw, _ := camel_tmp.Encoder()
+		tmprw, err := camel_tmp.Encoder()
+		if err != nil {
+			s.logs.ProcessError(err)
+		}
 		if _, err = conn.WriteTo(tmprw); err != nil {
 			s.logs.ProcessError(err)
 		}
@@ -248,7 +252,10 @@ func (s *Server) CamelResponse(conn *Listener, camel Camel_tcp) {
 		tmp.LengthParams = uint16(camel_params_map[0x0013].MaxLen)
 		tmp.Type = camel_params_map[tmp.Tag].Type
 		camel_tmp.Frame[tmp.Tag] = tmp
-		tmprw, _ := camel_tmp.Encoder()
+		tmprw, err := camel_tmp.Encoder()
+		if err != nil {
+			s.logs.ProcessError(err)
+		}
 		if _, err = conn.WriteTo(tmprw); err != nil {
 			s.logs.ProcessError(err)
 		}
@@ -264,7 +271,7 @@ func (s *Server) CamelResponse(conn *Listener, camel Camel_tcp) {
 }
 
 // init инициализирует глобальные переменные.
-func Init() {
+func init() {
 	camel_params_map = make(map[uint16]camel_param_desc)
 	for _, i := range camel_params_desc {
 		camel_params_map[i.Tag] = i

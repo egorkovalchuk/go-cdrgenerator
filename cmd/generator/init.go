@@ -16,7 +16,7 @@ import (
 // Запись ошибок из горутин для диаметра
 func DiamPrintErrors(ec <-chan *diam.ErrorReport) {
 	for err := range ec {
-		logs.ProcessDiam(err)
+		logs.ProcessError(err, "DIAM")
 	}
 }
 
@@ -77,7 +77,7 @@ func InitVariables() {
 		if task.DatapoolCsvLac != "" {
 			f, err := os.Open(task.DatapoolCsvLac)
 			if err != nil {
-				logs.ProcessErrorAny("Unable to read input file "+task.DatapoolCsvLac, err)
+				logs.ProcessError(fmt.Sprintf("Unable to read input file %s: %s", task.DatapoolCsvLac, err.Error()))
 				logs.ProcessError("Thread " + task.Name + " not start")
 			} else {
 				defer f.Close()

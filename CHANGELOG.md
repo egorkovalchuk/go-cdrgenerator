@@ -1,118 +1,144 @@
-# Change log
-## Vesion 0.1
-Added offline load
-## Vesion 0.2
-Added Diameter connection to Nexign NWM produtcs (3GPP Diameter Credit-Control Application)
-CCR/CCA type request "Event"
-## Vesion 0.2.1
-Fix Bug
-## Vesion 0.3.0
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+## [0.6.1] - 2026-03-10
+### Fixed
+- 🐛 Fixed TLV logger error
+
+### Changed 
+- TLV package initialization changed
+
+## [0.6.0] - 2026-02-10
 ### Added
-Add emulation of the switch operation with a 4011 response (no need credit control)
-### Fix Bug
-Remove variable in cycle init connection to Diam
-## Vesion 0.3.1
-### new fearure
-Add influx DB write stat
-## Vesion 0.4.0
-### new fearure
-Add CAMEL SCP
-## Vesion 0.4.1
-### new fearure
-The parameter CDR_Pattern has been moved from the array to a higher level
+- ✨ Added MakeFile for project build
+- ✨ Added roaming MSISDN generation
 
-Added monitoring Camel speed
+### Fixed
+- 🐛 Fixed TLV logger error
 
-Improved function for working with large buffers revc (SCP server)
-### Fix Bug
-Fix error when send channel write in files
+## [0.5.7] - 2025-10-13
+### Added
+- ✨ Added custom configurations
 
-Fix Diameter send, when no connection was initiated
-## Vesion 0.4.2
-### new fearure
-Added infux DB write stat for Diameter & Camel
+### Fixed
+- 🐛 Fixed error when rate parameter was specified only once
 
-Change write log in main process
+## [0.5.6] - 2025-07-04
+### Added
+- ✨ Added network connection close handler from client side
+- ✨ Added context to TLV connection
+- ✨ Added Diameter reconnection (reconnect)
+- ✨ Added offline CDR generation when no active connection is present
 
-Added call type generation MO & MT
+### Fixed
+- 🐛 Fixed subscriber B number generation
+- 🐛 Fixed new thread creation
 
-Removed separate log for Diameter
-### Fix Bug
-Fix SetReadDeadline timeout for Linux OS
-## Vesion 0.4.3
-### new fearure
-Added offline CDR when got CONFIRM with a Charge 00
+## [0.5.5] - 2025-03-05
+### Changed
+- 📦 InfluxDB moved to a separate package (implemented via package)
 
-Added parametr "thread" - enable start new threads
+## [0.5.4] - 2025-02-28
+### Added
+- ✨ TLV implemented via separate package
 
-Added Random MSISDN B
+### Fixed
+- 🐛 Fixed crash due to insufficient permissions to write offline CDR
+- 🐛 Fixed crash when encountering invalid lines in CSV Pool
 
-Added -rm optional - remove CDR files in temp directory
-## Vesion 0.4.4
-### new fearure
-Added re-reading of the pool
-### Fix Bug
-## Vesion 0.4.5
-### new fearure
-Added Location MSC generate, use pool CELL and LAC area
-### Fix Bug
-Fix connection termination
-## Vesion 0.4.6
-### new fearure
-Added UDP proto for InfluxDBv1
-### Fix Bug
-Fix connection to InfluxDBv2
-## Vesion 0.5.0
-### new fearure
-Added  CELL and LAC area pool creation  
-## Vesion 0.5.1
-### new fearure
-### Fix Bug
-Fix CAMEL connection
+## [0.5.3] - 2025-01-31
+### Added
+- ✨ Added proper shutdown for Linux
 
-Fix time delay sending
-## Vesion 0.5.2
-### new fearure
-Experimental(one write stream in camel)
-### Fix Bug
-Fix context 
-## Vesion 0.5.2
-### new fearure
-Added stop for linux
-## Vesion 0.5.4
-### new fearure
-TLV is implemented by the package
-### Fix Bug
-Fixed crash if there are not enough rights to write offline CDR
+## [0.5.2] - 2025-01-27
+### Added
+- ✨ Experimental feature (single write stream to Camel)
 
-Fixed crash if there are incorrect lines in the CSV Pool
-## Vesion 0.5.5
-### new fearure
-InfluxDB is implemented by the package
-## Vesion 0.5.6
-### new fearure
-### Fix Bug
-Added handler for closing a network connection from the client side
+### Fixed
+- 🐛 Fixed context handling
 
-Added context in tlv connect
+## [0.5.1] - 2024-11-17
+### Fixed
+- 🐛 Fixed CAMEL connection
+- 🐛 Fixed sending time delay
 
-Added reconnect Diameter
+## [0.5.0] - 2024
+### Added
+- ✨ Added CELL and LAC area pool creation
 
-Added offline CDR generation in the absence of an active connection
+## [0.4.6] - 2024
+### Added
+- ✨ Added UDP protocol for InfluxDB v1
 
-Fixed generation of subscriber B
+### Fixed
+- 🐛 Fixed InfluxDB v2 connection
 
-Fixed create new thread
-## Vesion 0.5.7
-### new fearure
-Add custom configs 
-### Fix Bug
-Fix error if once rete parameter
-## Vesion 0.5.8
-### new fearure
-Added MakeFile
-Added generate roam msisdn
-## Vesion 0.6.0
-### new fearure
-### Fix Bug
-Fix error tlv logger
+## [0.4.5] - 2024
+### Added
+- ✨ Added Location MSC generation using CELL and LAC pool
+
+### Fixed
+- 🐛 Fixed connection termination
+
+## [0.4.4] - 2024
+### Added
+- ✨ Added pool re-reading
+
+### Fixed
+- 🐛 Minor fixes
+
+## [0.4.3] - 2024
+### Added
+- ✨ Added offline CDR generation upon receiving CONFIRM with Charge 00
+- ✨ Added `thread` parameter to enable starting new threads
+- ✨ Added random MSISDN B generation
+- ✨ Added `-rm` flag to remove CDR files from temporary directory
+
+## [0.4.2] - 2024
+### Added
+- ✨ Added InfluxDB statistics logging for Diameter and Camel
+- ✨ Changed log writing in main process
+- ✨ Added MO and MT call type generation
+- ✨ Removed separate Diameter log
+
+### Fixed
+- 🐛 Fixed SetReadDeadline timeout for Linux OS
+
+## [0.4.1] - 2024
+### Added
+- ✨ `CDR_Pattern` parameter moved from array to top level
+- ✨ Added Camel speed monitoring
+- ✨ Improved function for working with large receive buffers (SCP server)
+
+### Fixed
+- 🐛 Fixed error when sending write channel to files
+- 🐛 Fixed Diameter sending when connection was not initiated
+
+## [0.4.0] - 2024
+### Added
+- ✨ Added CAMEL SCP
+
+## [0.3.1] - 2024
+### Added
+- ✨ Added InfluxDB statistics logging
+
+## [0.3.0] - 2024
+### Added
+- ✨ Added switch operation emulation with 4011 response (no credit control needed)
+
+### Fixed
+- 🐛 Removed variable in Diameter connection initialization loop
+
+## [0.2.1] - 2024
+### Fixed
+- 🐛 Bug fixes
+
+## [0.2.0] - 2024
+### Added
+- ✨ Added Diameter connection to Nexign NWM products (3GPP Diameter Credit-Control Application)
+- ✨ Support for CCR/CCA "Event" type requests
+
+## [0.1.0] - 2024
+### Added
+- ✨ Offline load functionality
